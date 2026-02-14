@@ -116,6 +116,77 @@ def test_train_and_eval_step_without_segmentator_branch() -> None:
     assert eval_output.stats["loss.segmentator"] == 0.0
 
 
+def test_train_step_uses_two_generator_passes_and_phase_train_modes(
+    monkeypatch,
+) -> None:
+    backend = create_backend(_lightweight_train_cfg())
+    _disable_backward_step(backend)
+
+    generator_calls: list[tuple[bool, bool]] = []
+    discriminator_calls: list[tuple[bool, bool, bool]] = []
+    segmentator_calls: list[bool] = []
+
+    orig_generator_forward = backend.models.generator.forward
+    orig_discriminator_forward = backend.models.discriminator.forward
+    if backend.models.segmentator is None:
+        raise AssertionError("Expected segmentator branch in GRD config")
+    orig_segmentator_forward = backend.models.segmentator.forward
+
+    def _generator_forward_spy(x: torch.Tensor):
+        generator_calls.append(
+            (
+                backend.models.generator.training,
+                torch.is_grad_enabled(),
+            )
+        )
+        return orig_generator_forward(x)
+
+    def _discriminator_forward_spy(x: torch.Tensor):
+        discriminator_calls.append(
+            (
+                backend.models.discriminator.training,
+                torch.is_grad_enabled(),
+                any(
+                    parameter.requires_grad
+                    for parameter in backend.models.discriminator.parameters()
+                ),
+            )
+        )
+        return orig_discriminator_forward(x)
+
+    def _segmentator_forward_spy(x: torch.Tensor):
+        segmentator_calls.append(backend.models.segmentator.training)
+        return orig_segmentator_forward(x)
+
+    monkeypatch.setattr(backend.models.generator, "forward", _generator_forward_spy)
+    monkeypatch.setattr(
+        backend.models.discriminator,
+        "forward",
+        _discriminator_forward_spy,
+    )
+    monkeypatch.setattr(
+        backend.models.segmentator,
+        "forward",
+        _segmentator_forward_spy,
+    )
+
+    _ = backend.train_step(_batch(channels=backend.cfg.data.channels))
+
+    assert len(generator_calls) == 2
+    assert generator_calls[0] == (False, False)
+    assert generator_calls[1] == (True, True)
+
+    assert len(discriminator_calls) == 4
+    assert discriminator_calls[0] == (True, True, True)
+    assert discriminator_calls[1] == (True, True, True)
+    assert discriminator_calls[2] == (False, False, False)
+    assert discriminator_calls[3] == (False, True, False)
+
+    assert segmentator_calls == [True]
+    discriminator_params = backend.models.discriminator.parameters()
+    assert all(parameter.requires_grad for parameter in discriminator_params)
+
+
 def test_resolve_device_auto_branch(monkeypatch) -> None:
     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
     assert str(create_backend(_lightweight_train_cfg()).device) == "cpu"

@@ -105,6 +105,8 @@ class ModelConfig(BaseModel):
     base_features: int = Field(ge=8)
     latent_dim: int = Field(ge=8)
     stages: tuple[int, ...] = (2, 2, 2, 2)
+    encoder_downsample_position: Literal["first", "last"] = "last"
+    decoder_upsample_position: Literal["first", "last"] = "last"
     dense_bottleneck: bool = False
     segmentator_base_features: int = Field(ge=8)
 

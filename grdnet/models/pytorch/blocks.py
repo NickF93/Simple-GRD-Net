@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
 from torch import nn
 
@@ -68,6 +70,8 @@ class ResidualEncoder(nn.Module):
         in_channels: int,
         base_features: int,
         stages: tuple[int, ...],
+        *,
+        downsample_position: Literal["first", "last"] = "last",
     ) -> None:
         super().__init__()
         self.stem = nn.Sequential(
@@ -88,7 +92,12 @@ class ResidualEncoder(nn.Module):
         for stage_idx, n_blocks in enumerate(stages):
             stage_channels = base_features * (2**stage_idx)
             for block_idx in range(n_blocks):
-                stride = 2 if block_idx == 0 else 1
+                is_downsample = (
+                    block_idx == 0
+                    if downsample_position == "first"
+                    else block_idx == n_blocks - 1
+                )
+                stride = 2 if is_downsample else 1
                 blocks.append(ResidualBlock(channels, stage_channels, stride=stride))
                 channels = stage_channels
         self.blocks = nn.Sequential(*blocks)
@@ -110,6 +119,8 @@ class ResidualDecoder(nn.Module):
         base_features: int,
         stages: tuple[int, ...],
         bottleneck_channels: int,
+        *,
+        upsample_position: Literal["first", "last"] = "last",
     ) -> None:
         super().__init__()
 
@@ -120,7 +131,12 @@ class ResidualDecoder(nn.Module):
         for stage_idx, n_blocks in enumerate(rev_stages):
             target_channels = base_features * (2 ** (len(rev_stages) - stage_idx - 1))
             for block_idx in range(n_blocks):
-                if block_idx == 0:
+                is_upsample = (
+                    block_idx == 0
+                    if upsample_position == "first"
+                    else block_idx == n_blocks - 1
+                )
+                if is_upsample:
                     modules.append(
                         nn.Sequential(
                             nn.ConvTranspose2d(
@@ -136,9 +152,7 @@ class ResidualDecoder(nn.Module):
                         )
                     )
                 else:
-                    modules.append(
-                        ResidualBlock(target_channels, target_channels, stride=1)
-                    )
+                    modules.append(ResidualBlock(channels, target_channels, stride=1))
                 channels = target_channels
 
         self.blocks = nn.Sequential(*modules)

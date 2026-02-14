@@ -43,6 +43,12 @@ model:
   base_features: 64
   latent_dim: 256
   stages: [2, 2, 2, 2]
+  # Paper-canonical convention: resample on the last block of each stage.
+  # Ablation alternative (legacy implementation): "first"
+  # encoder_downsample_position: "first"
+  # decoder_upsample_position: "first"
+  encoder_downsample_position: "last"
+  decoder_upsample_position: "last"
   dense_bottleneck: false
   segmentator_base_features: 64
 

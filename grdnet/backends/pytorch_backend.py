@@ -117,6 +117,19 @@ class PyTorchBackend(BackendStrategy):
         for parameter in module.parameters():
             parameter.requires_grad_(enabled)
 
+    def _set_train_modes(
+        self,
+        *,
+        generator: bool,
+        discriminator: bool,
+        segmentator: bool,
+    ) -> None:
+        """Set module train/eval states for one optimization phase."""
+        self.models.generator.train(generator)
+        self.models.discriminator.train(discriminator)
+        if self.models.segmentator is not None:
+            self.models.segmentator.train(segmentator)
+
     @property
     def device(self) -> torch.device:
         """Return backend runtime device."""
@@ -165,6 +178,8 @@ class PyTorchBackend(BackendStrategy):
             latent_dim=self.cfg.model.latent_dim,
             dense_bottleneck=self.cfg.model.dense_bottleneck,
             image_shape=patch_shape,
+            encoder_downsample_position=self.cfg.model.encoder_downsample_position,
+            decoder_upsample_position=self.cfg.model.decoder_upsample_position,
         ).to(self.device)
 
         discriminator = Discriminator(
@@ -172,6 +187,7 @@ class PyTorchBackend(BackendStrategy):
             base_features=self.cfg.model.base_features,
             stages=self.cfg.model.stages,
             image_shape=patch_shape,
+            encoder_downsample_position=self.cfg.model.encoder_downsample_position,
         ).to(self.device)
 
         segmentator: nn.Module | None = None
@@ -301,6 +317,38 @@ class PyTorchBackend(BackendStrategy):
         torch.Tensor,
         torch.Tensor,
     ]:
+        x, roi_mask, x_noisy, noise, noise_mask, beta = self._build_noisy_inputs(
+            x=x,
+            roi_mask=roi_mask,
+            with_augmentation=with_augmentation,
+        )
+
+        z, x_rebuilt, z_rebuilt = self.models.generator(x_noisy)
+
+        # Eq. (6) inspired noise penalty used in simple variant paper.
+        noise_pred = torch.abs(
+            ((1.0 - beta) * noise_mask * x_rebuilt) - (noise_mask * x_noisy)
+        )
+        noise_target = beta * noise
+        noise_loss = torch.nn.functional.mse_loss(noise_pred, noise_target)
+
+        return x, roi_mask, noise_mask, z, x_rebuilt, z_rebuilt, noise_loss, x_noisy
+
+    def _build_noisy_inputs(
+        self,
+        *,
+        x: torch.Tensor,
+        roi_mask: torch.Tensor,
+        with_augmentation: bool,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Create perturbed tuple for GAN phases."""
         if with_augmentation:
             x, roi_mask = apply_geometry_augmentation(
                 x,
@@ -316,54 +364,56 @@ class PyTorchBackend(BackendStrategy):
             x_noisy,
             self.cfg.augmentation.gaussian_noise_std_max,
         )
-
-        z, x_rebuilt, z_rebuilt = self.models.generator(x_noisy)
-
-        # Eq. (6) inspired noise penalty used in simple variant paper.
-        noise_pred = torch.abs(
-            ((1.0 - beta) * noise_mask * x_rebuilt) - (noise_mask * x_noisy)
-        )
-        noise_target = beta * noise
-        noise_loss = torch.nn.functional.mse_loss(noise_pred, noise_target)
-
-        return x, roi_mask, noise_mask, z, x_rebuilt, z_rebuilt, noise_loss, x_noisy
+        return x, roi_mask, x_noisy, noise, noise_mask, beta
 
     def train_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
         """Execute one training step over GAN and optional segmentator branches."""
-        self.models.generator.train()
-        self.models.discriminator.train()
-        if self.models.segmentator is not None:
-            self.models.segmentator.train()
-
         x, roi_mask, _ = self._prepare(batch)
-        with self._autocast():
-            (
-                x,
-                roi_mask,
-                noise_mask,
-                z,
-                x_rebuilt,
-                z_rebuilt,
-                noise_loss,
-                x_noisy,
-            ) = self._common_forward(x, roi_mask, with_augmentation=True)
 
-        # Discriminator step.
+        with self._autocast():
+            x, roi_mask, x_noisy, noise, noise_mask, beta = self._build_noisy_inputs(
+                x=x,
+                roi_mask=roi_mask,
+                with_augmentation=True,
+            )
+
+        # Discriminator phase: train D only, use detached fake built with no graph.
+        self._set_train_modes(
+            generator=False,
+            discriminator=True,
+            segmentator=False,
+        )
+        with self._autocast(), torch.no_grad():
+            _, x_rebuilt_disc, _ = self.models.generator(x_noisy)
         self.optimizers.discriminator.zero_grad(set_to_none=True)
         self._set_requires_grad(self.models.discriminator, True)
         with self._autocast():
             _, pred_real = self.models.discriminator(x)
-            _, pred_fake = self.models.discriminator(x_rebuilt.detach())
+            _, pred_fake = self.models.discriminator(x_rebuilt_disc)
             loss_disc, loss_disc_scalar = self.losses.discriminator_total(
                 pred_real,
                 pred_fake,
             )
         self._backward_step(loss=loss_disc, optimizer=self.optimizers.discriminator)
+        del x_rebuilt_disc
 
-        # Generator step.
+        # Generator phase: train G only, keep D in eval mode to freeze BN stats.
+        self._set_train_modes(
+            generator=True,
+            discriminator=False,
+            segmentator=False,
+        )
         self.optimizers.generator.zero_grad(set_to_none=True)
         self._set_requires_grad(self.models.discriminator, False)
         with self._autocast():
+            z, x_rebuilt, z_rebuilt = self.models.generator(x_noisy)
+
+            noise_pred = torch.abs(
+                ((1.0 - beta) * noise_mask * x_rebuilt) - (noise_mask * x_noisy)
+            )
+            noise_target = beta * noise
+            noise_loss = torch.nn.functional.mse_loss(noise_pred, noise_target)
+
             with torch.no_grad():
                 feat_real_gen, _ = self.models.discriminator(x)
             feat_fake_gen, _ = self.models.discriminator(x_rebuilt)
@@ -390,6 +440,11 @@ class PyTorchBackend(BackendStrategy):
             self.models.segmentator is not None
             and self.optimizers.segmentator is not None
         ):
+            self._set_train_modes(
+                generator=False,
+                discriminator=False,
+                segmentator=True,
+            )
             self.optimizers.segmentator.zero_grad(set_to_none=True)
             with self._autocast():
                 seg_map = self.models.segmentator(

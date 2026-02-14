@@ -263,6 +263,11 @@ Provided configs:
 DeepIndustrial-SN profile defaults are paper-aligned (`base_features: 128`, `stages: [3,3,3,3]`) and
 include commented lighter alternatives for ablation studies.
 
+Stage-resampling policy is now explicit and configurable:
+
+- `model.encoder_downsample_position`: `"last"` (paper-canonical) or `"first"` (ablation).
+- `model.decoder_upsample_position`: `"last"` (paper-canonical) or `"first"` (ablation).
+
 Backend stubs:
 
 - `configs/backends/pytorch.yaml`
@@ -307,6 +312,25 @@ Infer:
 
 ```bash
 grdnet infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026/epoch_0010.pt
+```
+
+### 6.1 DeepIndustrial-SN Training + Benchmark TODO Checklist
+
+Run from repository root:
+
+```bash
+python main.py validate-config -c configs/profiles/deepindustrial_sn_2026.yaml
+
+python main.py train -c configs/profiles/deepindustrial_sn_2026.yaml
+
+CKPT=$(ls -1 artifacts/checkpoints/deepindustrial_sn_2026/epoch_*.pt | sort | tail -n 1)
+echo "$CKPT"
+
+python main.py calibrate -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint "$CKPT"
+
+python main.py eval -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint "$CKPT"
+
+python main.py infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint "$CKPT"
 ```
 
 Troubleshooting:

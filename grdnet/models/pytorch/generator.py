@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
 from torch import nn
 
@@ -20,10 +22,22 @@ class GeneratorEDE(nn.Module):
         latent_dim: int,
         dense_bottleneck: bool,
         image_shape: tuple[int, int],
+        encoder_downsample_position: Literal["first", "last"] = "last",
+        decoder_upsample_position: Literal["first", "last"] = "last",
     ) -> None:
         super().__init__()
-        self.encoder = ResidualEncoder(in_channels, base_features, stages)
-        self.encoder_reconstructed = ResidualEncoder(in_channels, base_features, stages)
+        self.encoder = ResidualEncoder(
+            in_channels,
+            base_features,
+            stages,
+            downsample_position=encoder_downsample_position,
+        )
+        self.encoder_reconstructed = ResidualEncoder(
+            in_channels,
+            base_features,
+            stages,
+            downsample_position=encoder_downsample_position,
+        )
 
         self._dense_bottleneck = dense_bottleneck
         self._image_shape = image_shape
@@ -72,6 +86,7 @@ class GeneratorEDE(nn.Module):
             base_features=base_features,
             stages=stages,
             bottleneck_channels=bottleneck_channels,
+            upsample_position=decoder_upsample_position,
         )
 
     def _latent_projection(

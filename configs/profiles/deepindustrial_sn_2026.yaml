@@ -45,9 +45,15 @@ model:
   # Ablation alternative (previous lightweight setting):
   # base_features: 64
   # stages: [2, 2, 2, 2]
+  # Paper-canonical convention: resample on the last block of each stage.
+  # Ablation alternative (legacy implementation): "first"
+  # encoder_downsample_position: "first"
+  # decoder_upsample_position: "first"
   base_features: 128
   latent_dim: 64
   stages: [3, 3, 3, 3]
+  encoder_downsample_position: "last"
+  decoder_upsample_position: "last"
   dense_bottleneck: true
   segmentator_base_features: 64
 
