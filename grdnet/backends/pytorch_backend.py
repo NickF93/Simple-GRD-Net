@@ -113,6 +113,17 @@ class PyTorchBackend(BackendStrategy):
         for parameter in module.parameters():
             parameter.requires_grad_(enabled)
 
+    @staticmethod
+    def _reset_optimizer_step_flag(optimizer: Optimizer) -> None:
+        """Reset per-step optimizer marker used by scheduler ordering checks."""
+        optimizer._opt_called = False  # type: ignore[attr-defined]
+
+    def _reset_optimizer_step_flags(self) -> None:
+        self._reset_optimizer_step_flag(self.optimizers.generator)
+        self._reset_optimizer_step_flag(self.optimizers.discriminator)
+        if self.optimizers.segmentator is not None:
+            self._reset_optimizer_step_flag(self.optimizers.segmentator)
+
     def _set_train_modes(
         self,
         *,
@@ -364,6 +375,7 @@ class PyTorchBackend(BackendStrategy):
 
     def train_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
         """Execute one training step over GAN and optional segmentator branches."""
+        self._reset_optimizer_step_flags()
         x, roi_mask, _ = self._prepare(batch)
 
         with self._autocast():

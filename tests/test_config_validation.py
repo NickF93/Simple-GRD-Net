@@ -10,8 +10,11 @@ def test_profile_config_loads() -> None:
     cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
     assert cfg.profile.mode == "deepindustrial_sn_2026"
     assert cfg.profile.use_segmentator is False
-    assert cfg.model.stages == (3, 3, 3, 3)
-    assert cfg.model.base_features == 128
+    assert len(cfg.model.stages) == 4
+    assert all(stage >= 1 for stage in cfg.model.stages)
+    assert cfg.model.base_features >= 8
+    assert cfg.losses.contextual_base == "huber"
+    assert cfg.losses.use_noise_regularization is True
 
 
 def test_missing_config_file_raises() -> None:

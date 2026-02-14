@@ -6,6 +6,7 @@ import logging
 import math
 from pathlib import Path
 
+from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -19,6 +20,17 @@ LOGGER = logging.getLogger(__name__)
 
 class TrainingEngine:
     """Epoch-based training loop with periodic validation and checkpointing."""
+
+    _LOSS_POSTFIX_ABBREVIATIONS: dict[str, str] = {
+        "adversarial": "adv",
+        "contextual": "con",
+        "discriminator": "disc",
+        "encoder": "enc",
+        "generator": "gen",
+        "noise": "nse",
+        "segmentator": "seg",
+        "total_eval": "tot",
+    }
 
     def __init__(
         self,
@@ -49,9 +61,58 @@ class TrainingEngine:
             return None
 
     @staticmethod
+    def _postfix_key(metric_key: str) -> str:
+        if not metric_key.startswith("loss."):
+            return metric_key
+
+        suffix = metric_key.split(".", maxsplit=1)[1]
+        suffix_display = TrainingEngine._LOSS_POSTFIX_ABBREVIATIONS.get(suffix, suffix)
+        return f"l.{suffix_display}"
+
+    @staticmethod
     def _postfix_metrics(metrics: dict[str, float]) -> dict[str, str]:
         ordered = sorted(metrics.items())
-        return {key: f"{value:.5f}" for key, value in ordered}
+        out: dict[str, str] = {}
+        for key, value in ordered:
+            display_key = TrainingEngine._postfix_key(key)
+            if display_key in out:
+                display_key = key
+            out[display_key] = f"{value:.5f}"
+        return out
+
+    @staticmethod
+    def _optimizer_lr(optimizer: object) -> float | None:
+        """Read LR from the first optimizer param-group when available."""
+        param_groups = getattr(optimizer, "param_groups", None)
+        if not isinstance(param_groups, list) or not param_groups:
+            return None
+        first = param_groups[0]
+        if not isinstance(first, dict):
+            return None
+        raw = first.get("lr")
+        if raw is None:
+            return None
+        lr = float(raw)
+        if not math.isfinite(lr):
+            return None
+        return lr
+
+    def _postfix_lrs(self) -> dict[str, str]:
+        """Compact LR postfix values for progress-bar readability."""
+        out: dict[str, str] = {}
+        entries: list[tuple[str, object | None]] = [
+            ("lr.g", self.backend.optimizers.generator),
+            ("lr.d", self.backend.optimizers.discriminator),
+            ("lr.s", self.backend.optimizers.segmentator),
+        ]
+        for key, optimizer in entries:
+            if optimizer is None:
+                continue
+            lr = self._optimizer_lr(optimizer)
+            if lr is None:
+                continue
+            out[key] = f"{lr:.5e}"
+        return out
 
     def _run_loader(
         self,
@@ -108,15 +169,53 @@ class TrainingEngine:
                         key: running_totals[key] / step_idx
                         for key in sorted(running_totals)
                     }
-                    progress.set_postfix(self._postfix_metrics(averaged))
+                    postfix = self._postfix_metrics(averaged)
+                    if train:
+                        postfix.update(self._postfix_lrs())
+                    progress.set_postfix(postfix)
 
         return self._average(all_stats)
 
     def _step_schedulers(self) -> None:
-        self.backend.schedulers.generator.step()
-        self.backend.schedulers.discriminator.step()
-        if self.backend.schedulers.segmentator is not None:
-            self.backend.schedulers.segmentator.step()
+        self._maybe_step_scheduler(
+            self.backend.schedulers.generator,
+            optimizer=self.backend.optimizers.generator,
+            name="generator",
+        )
+        self._maybe_step_scheduler(
+            self.backend.schedulers.discriminator,
+            optimizer=self.backend.optimizers.discriminator,
+            name="discriminator",
+        )
+        if (
+            self.backend.schedulers.segmentator is not None
+            and self.backend.optimizers.segmentator is not None
+        ):
+            self._maybe_step_scheduler(
+                self.backend.schedulers.segmentator,
+                optimizer=self.backend.optimizers.segmentator,
+                name="segmentator",
+            )
+
+    @staticmethod
+    def _optimizer_stepped(optimizer: Optimizer) -> bool:
+        """Check whether optimizer.step() was called in the current train step."""
+        return bool(getattr(optimizer, "_opt_called", False))
+
+    def _maybe_step_scheduler(
+        self,
+        scheduler: object,
+        *,
+        optimizer: Optimizer,
+        name: str,
+    ) -> None:
+        if hasattr(scheduler, "optimizer") and not self._optimizer_stepped(optimizer):
+            LOGGER.debug(
+                "scheduler_step_skipped name=%s reason=optimizer_not_stepped",
+                name,
+            )
+            return
+        scheduler.step()
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader | None) -> None:
         """Execute the full epoch loop with optional validation."""
