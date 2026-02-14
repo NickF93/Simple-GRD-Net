@@ -41,6 +41,16 @@ class SchedulerBundle:
 
 
 @dataclass
+class TrainBatchPreview:
+    """Detached tensors used to render one train-batch preview artifact."""
+
+    x: torch.Tensor
+    x_noisy: torch.Tensor
+    noise_mask: torch.Tensor
+    x_rebuilt: torch.Tensor
+
+
+@dataclass
 class StepOutput:
     """Output payload for train/eval/inference step."""
 
@@ -49,6 +59,7 @@ class StepOutput:
     patch_scores: torch.Tensor
     heatmap: torch.Tensor
     seg_map: torch.Tensor | None
+    train_batch_preview: TrainBatchPreview | None = None
 
 
 class BackendStrategy(ABC):

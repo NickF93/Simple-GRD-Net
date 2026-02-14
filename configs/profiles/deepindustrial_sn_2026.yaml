@@ -98,3 +98,9 @@ inference:
 reporting:
   csv_metrics_filename: "metrics.csv"
   csv_predictions_filename: "predictions.csv"
+  train_batch_preview:
+    enabled: true
+    every_n_epochs: 1
+    step_index: 1
+    max_images: 8
+    subdir: "train_batch_previews"

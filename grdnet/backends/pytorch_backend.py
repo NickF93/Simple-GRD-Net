@@ -17,6 +17,7 @@ from grdnet.backends.base import (
     OptimizerBundle,
     SchedulerBundle,
     StepOutput,
+    TrainBatchPreview,
 )
 from grdnet.config.schema import ExperimentConfig
 from grdnet.core.exceptions import ConfigurationError
@@ -477,12 +478,21 @@ class PyTorchBackend(BackendStrategy):
             "loss.discriminator": float(loss_disc_scalar),
             "loss.segmentator": float(seg_loss_scalar),
         }
+        preview: TrainBatchPreview | None = None
+        if self.cfg.reporting.train_batch_preview.enabled:
+            preview = TrainBatchPreview(
+                x=x.detach(),
+                x_noisy=x_noisy.detach(),
+                noise_mask=noise_mask.detach(),
+                x_rebuilt=x_rebuilt.detach(),
+            )
         return StepOutput(
             stats=stats,
             x_rebuilt=x_rebuilt.detach(),
             patch_scores=patch_scores.detach(),
             heatmap=heatmap.detach(),
             seg_map=None if seg_map is None else seg_map.detach(),
+            train_batch_preview=preview,
         )
 
     def eval_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
