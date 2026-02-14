@@ -24,9 +24,33 @@ class SsimLoss(nn.Module):
         mu_x = functional.avg_pool2d(x, self.window_size, stride=1, padding=pad)
         mu_y = functional.avg_pool2d(y, self.window_size, stride=1, padding=pad)
 
-        sigma_x = functional.avg_pool2d(x * x, self.window_size, stride=1, padding=pad) - mu_x * mu_x
-        sigma_y = functional.avg_pool2d(y * y, self.window_size, stride=1, padding=pad) - mu_y * mu_y
-        sigma_xy = functional.avg_pool2d(x * y, self.window_size, stride=1, padding=pad) - mu_x * mu_y
+        sigma_x = (
+            functional.avg_pool2d(
+                x * x,
+                self.window_size,
+                stride=1,
+                padding=pad,
+            )
+            - mu_x * mu_x
+        )
+        sigma_y = (
+            functional.avg_pool2d(
+                y * y,
+                self.window_size,
+                stride=1,
+                padding=pad,
+            )
+            - mu_y * mu_y
+        )
+        sigma_xy = (
+            functional.avg_pool2d(
+                x * y,
+                self.window_size,
+                stride=1,
+                padding=pad,
+            )
+            - mu_x * mu_y
+        )
 
         numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * sigma_xy + c2)
         denominator = (mu_x * mu_x + mu_y * mu_y + c1) * (sigma_x + sigma_y + c2)
@@ -67,10 +91,14 @@ class GrdNetLossComputer:
         )
 
     def contextual(self, x: torch.Tensor, x_rebuilt: torch.Tensor) -> torch.Tensor:
-        """Contextual term with Huber+SSIM as in the simple paper profile."""
-        huber = self.huber(x_rebuilt, x)
+        """Contextual term with configurable profile-aligned base distance."""
+        base_distance: torch.Tensor
+        if self.cfg.losses.contextual_base == "huber":
+            base_distance = self.huber(x_rebuilt, x)
+        else:
+            base_distance = self.l1(x_rebuilt, x)
         ssim = self.ssim(x_rebuilt, x)
-        return self.cfg.losses.wa * huber + self.cfg.losses.wb * ssim
+        return self.cfg.losses.wa * base_distance + self.cfg.losses.wb * ssim
 
     def generator_total(
         self,
@@ -92,8 +120,9 @@ class GrdNetLossComputer:
             self.cfg.losses.w1 * adversarial
             + self.cfg.losses.w2 * contextual
             + self.cfg.losses.w3 * encoder
-            + self.cfg.losses.w4 * noise_loss
         )
+        if self.cfg.losses.use_noise_regularization:
+            total = total + (self.cfg.losses.w4 * noise_loss)
         stats = {
             "loss.contextual": float(contextual.detach().cpu().item()),
             "loss.adversarial": float(adversarial.detach().cpu().item()),
@@ -103,7 +132,11 @@ class GrdNetLossComputer:
         }
         return total, stats
 
-    def discriminator_total(self, pred_real: torch.Tensor, pred_fake: torch.Tensor) -> tuple[torch.Tensor, float]:
+    def discriminator_total(
+        self,
+        pred_real: torch.Tensor,
+        pred_fake: torch.Tensor,
+    ) -> tuple[torch.Tensor, float]:
         """Binary discrimination loss over real/fake probabilities."""
         ones = torch.ones_like(pred_real)
         zeros = torch.zeros_like(pred_fake)

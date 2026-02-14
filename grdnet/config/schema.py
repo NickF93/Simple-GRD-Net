@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ProfileConfig(BaseModel):
@@ -53,13 +54,31 @@ class DataConfig(BaseModel):
     channels: Literal[1, 3]
     batch_size: int = Field(ge=1)
     num_workers: int = Field(ge=0)
-    patch_size: int = Field(ge=16)
-    patch_stride: int = Field(ge=1)
+    patch_size: tuple[int, int]
+    patch_stride: tuple[int, int]
     nominal_train_only: bool = True
+
+    @field_validator("patch_size", "patch_stride", mode="before")
+    @classmethod
+    def parse_pair(cls, value: Any) -> tuple[int, int]:
+        """Parse square shorthand into explicit (height, width) pairs."""
+        if isinstance(value, int):
+            return (value, value)
+        if isinstance(value, (tuple, list)) and len(value) == 2:
+            first = int(value[0])
+            second = int(value[1])
+            return (first, second)
+        raise TypeError("patch_size/patch_stride must be int or pair [h, w]")
 
     @model_validator(mode="after")
     def validate_patch_shape(self) -> "DataConfig":
-        if self.patch_size > self.image_size:
+        patch_h, patch_w = self.patch_size
+        stride_h, stride_w = self.patch_stride
+        if patch_h < 16 or patch_w < 16:
+            raise ValueError("data.patch_size dimensions must be >= 16")
+        if stride_h < 1 or stride_w < 1:
+            raise ValueError("data.patch_stride dimensions must be >= 1")
+        if patch_h > self.image_size or patch_w > self.image_size:
             raise ValueError("data.patch_size cannot exceed data.image_size")
         return self
 
@@ -102,6 +121,8 @@ class LossConfig(BaseModel):
     w4: float = Field(ge=0.0)
     focal_gamma: float = Field(gt=0.0)
     focal_alpha: float = Field(gt=0.0, lt=1.0)
+    contextual_base: Literal["l1", "huber"] = "l1"
+    use_noise_regularization: bool = False
 
 
 class OptimizerConfig(BaseModel):
@@ -124,6 +145,7 @@ class SchedulerConfig(BaseModel):
     first_restart_steps: int = Field(ge=1)
     restart_t_mult: float = Field(ge=1.0)
     restart_gamma: float = Field(gt=0.0)
+    step_unit: Literal["epoch", "step"] = "epoch"
 
 
 class TrainingConfig(BaseModel):
@@ -146,6 +168,11 @@ class InferenceConfig(BaseModel):
 
     anomaly_threshold: float | None = Field(default=None, ge=0.0)
     run_acceptance_ratio: float = Field(default=0.7, gt=0.0, le=1.0)
+    scoring_strategy: Literal[
+        "profile_default",
+        "ssim",
+        "segmentator_roi_max",
+    ] = "profile_default"
 
 
 class ReportingConfig(BaseModel):

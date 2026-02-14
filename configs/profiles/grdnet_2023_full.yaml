@@ -25,8 +25,8 @@ data:
   channels: 3
   batch_size: 8
   num_workers: 4
-  patch_size: 128
-  patch_stride: 64
+  patch_size: [128, 128]
+  patch_stride: [64, 64]
   nominal_train_only: true
 
 augmentation:
@@ -50,7 +50,9 @@ losses:
   w1: 1.0
   w2: 50.0
   w3: 1.0
-  w4: 1.0
+  w4: 0.0
+  contextual_base: "l1"
+  use_noise_regularization: false
   focal_gamma: 2.0
   focal_alpha: 0.25
 
@@ -65,6 +67,7 @@ scheduler:
   first_restart_steps: 2500
   restart_t_mult: 2.0
   restart_gamma: 0.75
+  step_unit: "epoch"
 
 training:
   epochs: 200
@@ -77,6 +80,7 @@ training:
 inference:
   anomaly_threshold: null
   run_acceptance_ratio: 0.70
+  scoring_strategy: "profile_default"
 
 reporting:
   csv_metrics_filename: "metrics.csv"

@@ -19,21 +19,23 @@ class GeneratorEDE(nn.Module):
         stages: tuple[int, ...],
         latent_dim: int,
         dense_bottleneck: bool,
-        image_size: int,
+        image_shape: tuple[int, int],
     ) -> None:
         super().__init__()
         self.encoder = ResidualEncoder(in_channels, base_features, stages)
         self.encoder_reconstructed = ResidualEncoder(in_channels, base_features, stages)
 
         self._dense_bottleneck = dense_bottleneck
-        self._image_size = image_size
+        self._image_shape = image_shape
         self._latent_dim = latent_dim
 
         if dense_bottleneck:
             down_factor = 2 ** len(stages)
-            spatial = image_size // down_factor
-            self._spatial = spatial
-            flat_dim = self.encoder.out_channels * spatial * spatial
+            spatial_h = image_shape[0] // down_factor
+            spatial_w = image_shape[1] // down_factor
+            self._spatial_h = spatial_h
+            self._spatial_w = spatial_w
+            flat_dim = self.encoder.out_channels * spatial_h * spatial_w
             self.latent_down = nn.Sequential(
                 nn.Flatten(),
                 nn.Linear(flat_dim, latent_dim),
@@ -46,11 +48,21 @@ class GeneratorEDE(nn.Module):
             bottleneck_channels = self.encoder.out_channels
         else:
             self.latent_conv = nn.Sequential(
-                nn.Conv2d(self.encoder.out_channels, latent_dim, kernel_size=1, stride=1),
+                nn.Conv2d(
+                    self.encoder.out_channels,
+                    latent_dim,
+                    kernel_size=1,
+                    stride=1,
+                ),
                 nn.LeakyReLU(0.2, inplace=True),
             )
             self.latent_inv = nn.Sequential(
-                nn.Conv2d(latent_dim, self.encoder.out_channels, kernel_size=1, stride=1),
+                nn.Conv2d(
+                    latent_dim,
+                    self.encoder.out_channels,
+                    kernel_size=1,
+                    stride=1,
+                ),
                 nn.LeakyReLU(0.2, inplace=True),
             )
             bottleneck_channels = self.encoder.out_channels
@@ -62,15 +74,18 @@ class GeneratorEDE(nn.Module):
             bottleneck_channels=bottleneck_channels,
         )
 
-    def _latent_projection(self, encoded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _latent_projection(
+        self,
+        encoded: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if self._dense_bottleneck:
             latent_vec = self.latent_down(encoded)
             inv = self.latent_up(latent_vec)
             inv = inv.view(
                 encoded.shape[0],
                 encoded.shape[1],
-                self._spatial,
-                self._spatial,
+                self._spatial_h,
+                self._spatial_w,
             )
             return latent_vec, inv
 
@@ -79,7 +94,10 @@ class GeneratorEDE(nn.Module):
         inv = self.latent_inv(latent_map)
         return latent_vec, inv
 
-    def forward(self, x_noisy: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        x_noisy: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         encoded = self.encoder(x_noisy)
         z, decoder_input = self._latent_projection(encoded)
         x_rebuilt = self.decoder(decoder_input)

@@ -42,8 +42,13 @@ class TrainingEngine:
     def _run_loader(self, loader: DataLoader, *, train: bool) -> dict[str, float]:
         all_stats: list[dict[str, float]] = []
         for step_idx, batch in enumerate(loader, start=1):
-            output = self.backend.train_step(batch) if train else self.backend.eval_step(batch)
+            if train:
+                output = self.backend.train_step(batch)
+            else:
+                output = self.backend.eval_step(batch)
             all_stats.append(output.stats)
+            if train and self.cfg.scheduler.step_unit == "step":
+                self._step_schedulers()
             if step_idx % self.cfg.training.log_interval == 0:
                 LOGGER.info(
                     "step=%d mode=%s metrics=%s",
@@ -53,6 +58,12 @@ class TrainingEngine:
                 )
         return self._average(all_stats)
 
+    def _step_schedulers(self) -> None:
+        self.backend.schedulers.generator.step()
+        self.backend.schedulers.discriminator.step()
+        if self.backend.schedulers.segmentator is not None:
+            self.backend.schedulers.segmentator.step()
+
     def train(self, train_loader: DataLoader, val_loader: DataLoader | None) -> None:
         checkpoint_dir = Path(self.cfg.training.checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -60,10 +71,8 @@ class TrainingEngine:
         for epoch in range(1, self.cfg.training.epochs + 1):
             train_metrics = self._run_loader(train_loader, train=True)
 
-            self.backend.schedulers.generator.step()
-            self.backend.schedulers.discriminator.step()
-            if self.backend.schedulers.segmentator is not None:
-                self.backend.schedulers.segmentator.step()
+            if self.cfg.scheduler.step_unit == "epoch":
+                self._step_schedulers()
 
             for reporter in self.reporters:
                 reporter.log_epoch(epoch=epoch, split="train", metrics=train_metrics)

@@ -7,7 +7,6 @@ import logging
 import torch
 from torch import nn
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from grdnet.backends.base import (
     BackendStrategy,
@@ -28,6 +27,7 @@ from grdnet.training.perturbation import (
     apply_geometry_augmentation,
     apply_perlin_perturbation,
 )
+from grdnet.training.schedulers import GammaCosineAnnealingWarmRestarts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,20 +55,21 @@ class PyTorchBackend(BackendStrategy):
         return self._device
 
     def build_models(self) -> ModelBundle:
+        patch_shape = self.cfg.data.patch_size
         generator = GeneratorEDE(
             in_channels=self.cfg.data.channels,
             base_features=self.cfg.model.base_features,
             stages=self.cfg.model.stages,
             latent_dim=self.cfg.model.latent_dim,
             dense_bottleneck=self.cfg.model.dense_bottleneck,
-            image_size=self.cfg.data.patch_size,
+            image_shape=patch_shape,
         ).to(self.device)
 
         discriminator = Discriminator(
             in_channels=self.cfg.data.channels,
             base_features=self.cfg.model.base_features,
             stages=self.cfg.model.stages,
-            image_size=self.cfg.data.patch_size,
+            image_shape=patch_shape,
         ).to(self.device)
 
         segmentator: nn.Module | None = None
@@ -107,31 +108,45 @@ class PyTorchBackend(BackendStrategy):
                 betas=betas,
                 weight_decay=self.cfg.optimizer.weight_decay,
             )
-        return OptimizerBundle(generator=generator, discriminator=discriminator, segmentator=segmentator)
+        return OptimizerBundle(
+            generator=generator,
+            discriminator=discriminator,
+            segmentator=segmentator,
+        )
 
     def build_schedulers(self, optimizers: OptimizerBundle) -> SchedulerBundle:
-        generator = CosineAnnealingWarmRestarts(
+        generator = GammaCosineAnnealingWarmRestarts(
             optimizers.generator,
-            T_0=self.cfg.scheduler.first_restart_steps,
-            T_mult=int(self.cfg.scheduler.restart_t_mult),
+            first_restart_steps=self.cfg.scheduler.first_restart_steps,
+            restart_t_mult=self.cfg.scheduler.restart_t_mult,
+            restart_gamma=self.cfg.scheduler.restart_gamma,
         )
-        discriminator = CosineAnnealingWarmRestarts(
+        discriminator = GammaCosineAnnealingWarmRestarts(
             optimizers.discriminator,
-            T_0=self.cfg.scheduler.first_restart_steps,
-            T_mult=int(self.cfg.scheduler.restart_t_mult),
+            first_restart_steps=self.cfg.scheduler.first_restart_steps,
+            restart_t_mult=self.cfg.scheduler.restart_t_mult,
+            restart_gamma=self.cfg.scheduler.restart_gamma,
         )
 
         segmentator = None
         if optimizers.segmentator is not None:
-            segmentator = CosineAnnealingWarmRestarts(
+            segmentator = GammaCosineAnnealingWarmRestarts(
                 optimizers.segmentator,
-                T_0=self.cfg.scheduler.first_restart_steps,
-                T_mult=int(self.cfg.scheduler.restart_t_mult),
+                first_restart_steps=self.cfg.scheduler.first_restart_steps,
+                restart_t_mult=self.cfg.scheduler.restart_t_mult,
+                restart_gamma=self.cfg.scheduler.restart_gamma,
             )
 
-        return SchedulerBundle(generator=generator, discriminator=discriminator, segmentator=segmentator)
+        return SchedulerBundle(
+            generator=generator,
+            discriminator=discriminator,
+            segmentator=segmentator,
+        )
 
-    def _prepare(self, batch: dict[str, torch.Tensor | int | str]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _prepare(
+        self,
+        batch: dict[str, torch.Tensor | int | str],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         image = batch["image"]
         roi_mask = batch["roi_mask"]
         gt_mask = batch["gt_mask"]
@@ -183,15 +198,27 @@ class PyTorchBackend(BackendStrategy):
         torch.Tensor,
     ]:
         if with_augmentation:
-            x, roi_mask = apply_geometry_augmentation(x, roi_mask, self.cfg.augmentation)
+            x, roi_mask = apply_geometry_augmentation(
+                x,
+                roi_mask,
+                self.cfg.augmentation,
+            )
 
-        x_noisy, noise, noise_mask, beta = apply_perlin_perturbation(x, self.cfg.augmentation)
-        x_noisy = apply_gaussian_noise(x_noisy, self.cfg.augmentation.gaussian_noise_std_max)
+        x_noisy, noise, noise_mask, beta = apply_perlin_perturbation(
+            x,
+            self.cfg.augmentation,
+        )
+        x_noisy = apply_gaussian_noise(
+            x_noisy,
+            self.cfg.augmentation.gaussian_noise_std_max,
+        )
 
         z, x_rebuilt, z_rebuilt = self.models.generator(x_noisy)
 
         # Eq. (6) inspired noise penalty used in simple variant paper.
-        noise_pred = torch.abs(((1.0 - beta) * noise_mask * x_rebuilt) - (noise_mask * x_noisy))
+        noise_pred = torch.abs(
+            ((1.0 - beta) * noise_mask * x_rebuilt) - (noise_mask * x_noisy)
+        )
         noise_target = beta * noise
         noise_loss = torch.nn.functional.mse_loss(noise_pred, noise_target)
 
@@ -204,17 +231,25 @@ class PyTorchBackend(BackendStrategy):
             self.models.segmentator.train()
 
         x, roi_mask, _ = self._prepare(batch)
-        x, roi_mask, noise_mask, z, x_rebuilt, z_rebuilt, noise_loss, x_noisy = self._common_forward(
+        (
             x,
             roi_mask,
-            with_augmentation=True,
-        )
+            noise_mask,
+            z,
+            x_rebuilt,
+            z_rebuilt,
+            noise_loss,
+            x_noisy,
+        ) = self._common_forward(x, roi_mask, with_augmentation=True)
 
         # Discriminator step.
         self.optimizers.discriminator.zero_grad(set_to_none=True)
         _, pred_real = self.models.discriminator(x)
         _, pred_fake = self.models.discriminator(x_rebuilt.detach())
-        loss_disc, loss_disc_scalar = self.losses.discriminator_total(pred_real, pred_fake)
+        loss_disc, loss_disc_scalar = self.losses.discriminator_total(
+            pred_real,
+            pred_fake,
+        )
         loss_disc.backward()
         self.optimizers.discriminator.step()
 
@@ -233,14 +268,22 @@ class PyTorchBackend(BackendStrategy):
         )
         loss_gen.backward()
         if self.cfg.training.max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(self.models.generator.parameters(), self.cfg.training.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                self.models.generator.parameters(),
+                self.cfg.training.max_grad_norm,
+            )
         self.optimizers.generator.step()
 
         seg_map: torch.Tensor | None = None
         seg_loss_scalar = 0.0
-        if self.models.segmentator is not None and self.optimizers.segmentator is not None:
+        if (
+            self.models.segmentator is not None
+            and self.optimizers.segmentator is not None
+        ):
             self.optimizers.segmentator.zero_grad(set_to_none=True)
-            seg_map = self.models.segmentator(torch.cat([x_noisy, x_rebuilt.detach()], dim=1))
+            seg_map = self.models.segmentator(
+                torch.cat([x_noisy, x_rebuilt.detach()], dim=1)
+            )
             loss_seg, seg_loss_scalar = self.losses.segmentator_total(
                 pred_mask=seg_map,
                 gt_mask=noise_mask,
@@ -257,7 +300,13 @@ class PyTorchBackend(BackendStrategy):
             "loss.discriminator": float(loss_disc_scalar),
             "loss.segmentator": float(seg_loss_scalar),
         }
-        return StepOutput(stats=stats, x_rebuilt=x_rebuilt, patch_scores=patch_scores, heatmap=heatmap, seg_map=seg_map)
+        return StepOutput(
+            stats=stats,
+            x_rebuilt=x_rebuilt,
+            patch_scores=patch_scores,
+            heatmap=heatmap,
+            seg_map=seg_map,
+        )
 
     def eval_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
         self.models.generator.eval()
@@ -267,11 +316,16 @@ class PyTorchBackend(BackendStrategy):
 
         with torch.no_grad():
             x, roi_mask, _ = self._prepare(batch)
-            x, roi_mask, noise_mask, z, x_rebuilt, z_rebuilt, noise_loss, x_noisy = self._common_forward(
+            (
                 x,
                 roi_mask,
-                with_augmentation=False,
-            )
+                noise_mask,
+                z,
+                x_rebuilt,
+                z_rebuilt,
+                noise_loss,
+                x_noisy,
+            ) = self._common_forward(x, roi_mask, with_augmentation=False)
 
             feat_real, pred_real = self.models.discriminator(x)
             feat_fake, pred_fake = self.models.discriminator(x_rebuilt)
@@ -284,12 +338,17 @@ class PyTorchBackend(BackendStrategy):
                 feat_fake=feat_fake,
                 noise_loss=noise_loss,
             )
-            loss_disc, loss_disc_scalar = self.losses.discriminator_total(pred_real, pred_fake)
+            loss_disc, loss_disc_scalar = self.losses.discriminator_total(
+                pred_real,
+                pred_fake,
+            )
 
             seg_map: torch.Tensor | None = None
             seg_loss_scalar = 0.0
             if self.models.segmentator is not None:
-                seg_map = self.models.segmentator(torch.cat([x_noisy, x_rebuilt], dim=1))
+                seg_map = self.models.segmentator(
+                    torch.cat([x_noisy, x_rebuilt], dim=1)
+                )
                 _, seg_loss_scalar = self.losses.segmentator_total(
                     pred_mask=seg_map,
                     gt_mask=noise_mask,
@@ -303,7 +362,9 @@ class PyTorchBackend(BackendStrategy):
                 **stats_gen,
                 "loss.discriminator": float(loss_disc_scalar),
                 "loss.segmentator": float(seg_loss_scalar),
-                "loss.total_eval": float(loss_gen.detach().cpu().item() + loss_disc.detach().cpu().item()),
+                "loss.total_eval": float(
+                    loss_gen.detach().cpu().item() + loss_disc.detach().cpu().item()
+                ),
             }
             return StepOutput(
                 stats=stats,
@@ -319,16 +380,38 @@ class PyTorchBackend(BackendStrategy):
             self.models.segmentator.eval()
 
         with torch.no_grad():
-            x, _, _ = self._prepare(batch)
+            x, roi_mask, _ = self._prepare(batch)
             z, x_rebuilt, _ = self.models.generator(x)
             del z
 
-            patch_scores = anomaly_score_ssim_per_sample(x, x_rebuilt)
-            heatmap = anomaly_heatmap(x, x_rebuilt)
-
             seg_map: torch.Tensor | None = None
-            if self.models.segmentator is not None and self.cfg.profile.mode == "grdnet_2023_full":
+            if (
+                self.models.segmentator is not None
+                and self.cfg.profile.mode == "grdnet_2023_full"
+            ):
                 seg_map = self.models.segmentator(torch.cat([x, x_rebuilt], dim=1))
+
+            scoring_strategy = self.cfg.inference.scoring_strategy
+            if scoring_strategy == "profile_default":
+                scoring_strategy = (
+                    "segmentator_roi_max"
+                    if self.cfg.profile.mode == "grdnet_2023_full"
+                    else "ssim"
+                )
+
+            if scoring_strategy == "segmentator_roi_max" and seg_map is None:
+                raise RuntimeError(
+                    "segmentator_roi_max scoring requires segmentator "
+                    "enabled and available"
+                )
+
+            if scoring_strategy == "segmentator_roi_max" and seg_map is not None:
+                roi_intersection = seg_map * roi_mask
+                patch_scores = roi_intersection.flatten(start_dim=1).amax(dim=1)
+                heatmap = roi_intersection
+            else:
+                patch_scores = anomaly_score_ssim_per_sample(x, x_rebuilt)
+                heatmap = anomaly_heatmap(x, x_rebuilt)
 
             stats = {
                 "score.mean": float(patch_scores.mean().detach().cpu().item()),

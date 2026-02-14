@@ -17,14 +17,15 @@ class Discriminator(nn.Module):
         in_channels: int,
         base_features: int,
         stages: tuple[int, ...],
-        image_size: int,
+        image_shape: tuple[int, int],
     ) -> None:
         super().__init__()
         self.encoder = ResidualEncoder(in_channels, base_features, stages)
 
         down_factor = 2 ** len(stages)
-        spatial = image_size // down_factor
-        dense_in = self.encoder.out_channels * spatial * spatial
+        spatial_h = image_shape[0] // down_factor
+        spatial_w = image_shape[1] // down_factor
+        dense_in = self.encoder.out_channels * spatial_h * spatial_w
 
         self.classifier = nn.Sequential(
             nn.Flatten(),

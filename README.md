@@ -66,6 +66,10 @@ $$
 
 where `FL` is focal loss.
 
+Default implementation policy for this profile:
+- contextual base term uses `L1`
+- noise regularization term `L_{nse}` is disabled
+
 ### 1.2 DeepIndustrial-SN 2026 profile (`deepindustrial_sn_2026`)
 
 This profile keeps the generative adversarial core, with deployment-oriented constraints and score computation.
@@ -101,6 +105,10 @@ H = \lvert X - \hat{X} \rvert
 $$
 
 with per-sample min-max normalization.
+
+Default implementation policy for this profile:
+- contextual base term uses `Huber`
+- noise regularization term `L_{nse}` is enabled
 
 ## 2. Architecture
 
@@ -148,6 +156,7 @@ Notes:
 - Training can be `nominal_train_only=true`.
 - `roi_root` missing defaults ROI to all ones.
 - `mask_root` missing defaults ground-truth mask to zeros.
+- `patch_size` and `patch_stride` accept either scalar values or explicit pairs `[h, w]`.
 
 ## 4. Config Profiles
 
@@ -205,7 +214,7 @@ grdnet infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifa
 Artifacts are written under `training.output_dir` and `training.checkpoint_dir` from YAML:
 
 - `metrics.csv`: epoch and evaluation metrics.
-- `predictions.csv`: patch-wise scores/predictions.
+- `predictions.csv`: patch-wise scores/predictions plus image-level aggregation fields (`image_prediction`, `anomalous_patch_ratio`).
 - `epoch_XXXX.pt`: full training checkpoints.
 
 ## 8. Backend Status
