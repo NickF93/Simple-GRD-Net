@@ -1,15 +1,19 @@
-import json
 import logging
 import os
+import re
 
 import torch
 
-from grdnet.core.logging import JsonLogFormatter, configure_logging
+from grdnet.core.logging import ColorLogFormatter, configure_logging
 from grdnet.core.reproducibility import set_global_seed
 
 
-def test_json_log_formatter_payload() -> None:
-    formatter = JsonLogFormatter()
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def test_color_log_formatter_payload() -> None:
+    formatter = ColorLogFormatter()
     logger = logging.getLogger("grdnet.test")
     record = logger.makeRecord(
         name="grdnet.test",
@@ -20,19 +24,19 @@ def test_json_log_formatter_payload() -> None:
         args=(),
         exc_info=None,
     )
-    payload = json.loads(formatter.format(record))
-    assert payload["level"] == "INFO"
-    assert payload["logger"] == "grdnet.test"
-    assert payload["message"] == "hello"
-    assert "timestamp" in payload
+    plain = _strip_ansi(formatter.format(record))
+    assert "INFO" in plain
+    assert "grdnet.test" in plain
+    assert "hello" in plain
+    assert " | " in plain
 
 
-def test_configure_logging_sets_json_formatter() -> None:
+def test_configure_logging_sets_color_formatter() -> None:
     configure_logging("debug")
     root = logging.getLogger()
     assert root.level == logging.DEBUG
     assert root.handlers
-    assert isinstance(root.handlers[0].formatter, JsonLogFormatter)
+    assert isinstance(root.handlers[0].formatter, ColorLogFormatter)
 
 
 def test_set_global_seed_sets_expected_state() -> None:

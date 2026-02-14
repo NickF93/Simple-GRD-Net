@@ -12,6 +12,7 @@ pytest-cov==6.0.0
 ruff==0.9.4
 bandit==1.8.2
 pip-audit==2.8.0
+colorama==0.4.6
 
 # Optional for future backend parity (scaffold-only in v1):
 # tensorflow==2.18.0

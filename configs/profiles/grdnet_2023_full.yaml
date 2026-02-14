@@ -14,12 +14,14 @@ system:
   log_level: "INFO"
 
 data:
-  train_dir: "/tmp/ds/train"
-  val_dir: "/tmp/ds/val"
-  test_dir: "/tmp/ds/test"
-  calibration_dir: "/tmp/ds/calibration"
-  roi_dir: "/tmp/ds/roi"
-  mask_dir: "/tmp/ds/mask"
+  # MVTec benchmark root (repository symlink).
+  # The datamodule auto-detects category folders and split subdirs.
+  train_dir: "./mvtec"
+  val_dir: null
+  test_dir: "./mvtec"
+  calibration_dir: "./mvtec"
+  roi_dir: null
+  mask_dir: null
   class_good_name: "good"
   image_size: 256
   channels: 3

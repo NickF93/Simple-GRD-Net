@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ import torch
 
 from grdnet.backends.registry import create_backend
 from grdnet.config.loader import load_experiment_config
+from grdnet.core.exceptions import ConfigurationError
 
 
 def _lightweight_train_cfg():
@@ -41,8 +43,8 @@ def _lightweight_runtime_cfg():
     return cfg
 
 
-def _batch() -> dict[str, torch.Tensor]:
-    image = torch.rand((1, 1, 32, 32), dtype=torch.float32)
+def _batch(*, channels: int) -> dict[str, torch.Tensor]:
+    image = torch.rand((1, channels, 32, 32), dtype=torch.float32)
     roi_mask = torch.ones_like(image)
     gt_mask = torch.zeros_like(image)
     return {
@@ -52,16 +54,23 @@ def _batch() -> dict[str, torch.Tensor]:
     }
 
 
+def _disable_backward_step(backend) -> None:
+    def _no_backward_step(**_kwargs) -> None:
+        return None
+
+    backend._backward_step = _no_backward_step
+
+
 def test_train_step_and_eval_step_smoke() -> None:
     backend = create_backend(_lightweight_train_cfg())
-    backend._backward_step = lambda **kwargs: None  # type: ignore[assignment]
+    _disable_backward_step(backend)
 
-    train_output = backend.train_step(_batch())
+    train_output = backend.train_step(_batch(channels=backend.cfg.data.channels))
     assert "loss.generator" in train_output.stats
     assert train_output.patch_scores.ndim == 1
     assert train_output.heatmap.ndim == 4
 
-    eval_output = backend.eval_step(_batch())
+    eval_output = backend.eval_step(_batch(channels=backend.cfg.data.channels))
     assert "loss.total_eval" in eval_output.stats
     assert eval_output.patch_scores.ndim == 1
     assert eval_output.heatmap.ndim == 4
@@ -96,13 +105,13 @@ def test_prepare_requires_tensor_fields() -> None:
 
 def test_train_and_eval_step_without_segmentator_branch() -> None:
     backend = create_backend(_lightweight_runtime_cfg())
-    backend._backward_step = lambda **kwargs: None  # type: ignore[assignment]
+    _disable_backward_step(backend)
 
-    train_output = backend.train_step(_batch())
+    train_output = backend.train_step(_batch(channels=backend.cfg.data.channels))
     assert train_output.seg_map is None
     assert train_output.stats["loss.segmentator"] == 0.0
 
-    eval_output = backend.eval_step(_batch())
+    eval_output = backend.eval_step(_batch(channels=backend.cfg.data.channels))
     assert eval_output.seg_map is None
     assert eval_output.stats["loss.segmentator"] == 0.0
 
@@ -110,6 +119,31 @@ def test_train_and_eval_step_without_segmentator_branch() -> None:
 def test_resolve_device_auto_branch(monkeypatch) -> None:
     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
     assert str(create_backend(_lightweight_train_cfg()).device) == "cpu"
+
+
+def test_resolve_device_auto_falls_back_on_cuda_warning(monkeypatch) -> None:
+    monkeypatch.setattr("torch.backends.cuda.is_built", lambda: True)
+
+    def _warn_then_false() -> bool:
+        warnings.warn("cuda probe failed", UserWarning, stacklevel=1)
+        return False
+
+    monkeypatch.setattr("torch.cuda.is_available", _warn_then_false)
+    assert str(create_backend(_lightweight_train_cfg()).device) == "cpu"
+
+
+def test_resolve_device_cuda_raises_on_probe_warning(monkeypatch) -> None:
+    cfg = _lightweight_train_cfg()
+    cfg.backend.device = "cuda"
+    monkeypatch.setattr("torch.backends.cuda.is_built", lambda: True)
+
+    def _warn_then_false() -> bool:
+        warnings.warn("cuda probe failed", UserWarning, stacklevel=1)
+        return False
+
+    monkeypatch.setattr("torch.cuda.is_available", _warn_then_false)
+    with pytest.raises(ConfigurationError, match="initialization failed"):
+        _ = create_backend(cfg)
 
 
 def test_autocast_mode_switches_with_amp_flag(monkeypatch) -> None:

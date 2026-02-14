@@ -225,7 +225,17 @@ mvtec/
     ...
 ```
 
-Configured split roots remain explicit in YAML (`data.train_dir`, `data.test_dir`, `data.mask_dir`, ...). For one category:
+Configured split roots remain explicit in YAML (`data.train_dir`, `data.test_dir`, `data.mask_dir`, ...). The
+official profile defaults now target the benchmark root symlink directly:
+
+```text
+train_dir: ./mvtec
+test_dir: ./mvtec
+calibration_dir: ./mvtec
+mask_dir: null
+```
+
+Per-category configuration is also supported:
 
 ```text
 train_dir: mvtec/<category>/train
@@ -236,6 +246,7 @@ mask_dir: mvtec/<category>/ground_truth
 Notes:
 
 - Training can be `nominal_train_only=true`.
+- Official profile defaults use automatic device selection (`backend.device: "auto"`).
 - `roi_root` missing defaults ROI to all ones.
 - Missing ground-truth mask is accepted only for `good` samples and treated as all-zero mask.
 - Missing ground-truth mask for anomalous samples fails fast with explicit error.
@@ -297,6 +308,11 @@ Infer:
 ```bash
 grdnet infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026/epoch_0010.pt
 ```
+
+Troubleshooting:
+
+- `backend.device: "auto"` probes CUDA. If CUDA initialization fails, the backend now reports a deterministic error message and falls back to CPU.
+- If training is OOM, lower `data.batch_size` (for example `32 -> 8 -> 4 -> 2`).
 
 ## 7. Output Artifacts
 

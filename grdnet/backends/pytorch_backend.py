@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Iterable
 from contextlib import nullcontext
 
@@ -41,6 +42,7 @@ class PyTorchBackend(BackendStrategy):
     def __init__(self, cfg: ExperimentConfig) -> None:
         super().__init__(cfg)
         self._device = self._resolve_device(cfg.backend.device)
+        LOGGER.info("backend=pytorch selected_device=%s", self._device)
         self._amp_enabled = cfg.backend.mixed_precision
         if self._amp_enabled and self._device.type != "cuda":
             raise ConfigurationError(
@@ -64,8 +66,56 @@ class PyTorchBackend(BackendStrategy):
     @staticmethod
     def _resolve_device(raw: str) -> torch.device:
         if raw == "auto":
-            return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        return torch.device(raw)
+            if not torch.backends.cuda.is_built():
+                return torch.device("cpu")
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "error",
+                        category=UserWarning,
+                        module=r"torch\.cuda",
+                    )
+                    is_available = torch.cuda.is_available()
+            except Warning as exc:
+                LOGGER.error(
+                    "CUDA auto-probe failed; falling back to CPU. "
+                    "Fix CUDA driver/runtime for GPU execution. detail=%s",
+                    exc,
+                )
+                return torch.device("cpu")
+            return torch.device("cuda" if is_available else "cpu")
+
+        device = torch.device(raw)
+        if device.type == "cuda":
+            if not torch.backends.cuda.is_built():
+                raise ConfigurationError(
+                    "backend.device='cuda' requested, but this PyTorch build "
+                    "does not include CUDA support."
+                )
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "error",
+                        category=UserWarning,
+                        module=r"torch\.cuda",
+                    )
+                    is_available = torch.cuda.is_available()
+            except Warning as exc:
+                raise ConfigurationError(
+                    "backend.device='cuda' requested, but CUDA initialization "
+                    f"failed: {exc}"
+                ) from exc
+            if not is_available:
+                raise ConfigurationError(
+                    "backend.device='cuda' requested, but no CUDA device is "
+                    "available."
+                )
+        return device
+
+    @staticmethod
+    def _set_requires_grad(module: nn.Module, enabled: bool) -> None:
+        for parameter in module.parameters():
+            parameter.requires_grad_(enabled)
 
     @property
     def device(self) -> torch.device:
@@ -295,6 +345,7 @@ class PyTorchBackend(BackendStrategy):
 
         # Discriminator step.
         self.optimizers.discriminator.zero_grad(set_to_none=True)
+        self._set_requires_grad(self.models.discriminator, True)
         with self._autocast():
             _, pred_real = self.models.discriminator(x)
             _, pred_fake = self.models.discriminator(x_rebuilt.detach())
@@ -306,8 +357,10 @@ class PyTorchBackend(BackendStrategy):
 
         # Generator step.
         self.optimizers.generator.zero_grad(set_to_none=True)
+        self._set_requires_grad(self.models.discriminator, False)
         with self._autocast():
-            feat_real_gen, _ = self.models.discriminator(x)
+            with torch.no_grad():
+                feat_real_gen, _ = self.models.discriminator(x)
             feat_fake_gen, _ = self.models.discriminator(x_rebuilt)
             loss_gen, stats_gen = self.losses.generator_total(
                 x=x,
@@ -324,6 +377,7 @@ class PyTorchBackend(BackendStrategy):
             parameters=self.models.generator.parameters(),
             max_grad_norm=self.cfg.training.max_grad_norm,
         )
+        self._set_requires_grad(self.models.discriminator, True)
 
         seg_map: torch.Tensor | None = None
         seg_loss_scalar = 0.0
@@ -346,8 +400,9 @@ class PyTorchBackend(BackendStrategy):
                 optimizer=self.optimizers.segmentator,
             )
 
-        patch_scores = anomaly_score_ssim_per_sample(x, x_rebuilt)
-        heatmap = anomaly_heatmap(x, x_rebuilt)
+        with torch.no_grad():
+            patch_scores = anomaly_score_ssim_per_sample(x, x_rebuilt)
+            heatmap = anomaly_heatmap(x, x_rebuilt)
 
         stats = {
             **stats_gen,
@@ -356,10 +411,10 @@ class PyTorchBackend(BackendStrategy):
         }
         return StepOutput(
             stats=stats,
-            x_rebuilt=x_rebuilt,
-            patch_scores=patch_scores,
-            heatmap=heatmap,
-            seg_map=seg_map,
+            x_rebuilt=x_rebuilt.detach(),
+            patch_scores=patch_scores.detach(),
+            heatmap=heatmap.detach(),
+            seg_map=None if seg_map is None else seg_map.detach(),
         )
 
     def eval_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:

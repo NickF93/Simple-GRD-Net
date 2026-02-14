@@ -1,33 +1,45 @@
-"""Structured logging helpers."""
+"""Colorized logging helpers."""
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
-from typing import Any
+
+from colorama import Back, Fore, Style
+from colorama import init as colorama_init
 
 
-class JsonLogFormatter(logging.Formatter):
-    """Minimal JSON formatter with deterministic field ordering."""
+class ColorLogFormatter(logging.Formatter):
+    """Terminal-friendly formatter with level-based coloring."""
 
     def format(self, record: logging.LogRecord) -> str:
-        payload: dict[str, Any] = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
+        timestamp = datetime.now(UTC).isoformat()
+        message = (
+            f"{timestamp} | {record.levelname:<8} | {record.name} | "
+            f"{record.getMessage()}"
+        )
         if record.exc_info:
-            payload["exc_info"] = self.formatException(record.exc_info)
-        return json.dumps(payload, sort_keys=True)
+            message = f"{message}\n{self.formatException(record.exc_info)}"
+
+        if record.levelno >= logging.CRITICAL:
+            color = Fore.WHITE + Back.RED + Style.BRIGHT
+        elif record.levelno >= logging.ERROR:
+            color = Fore.RED + Style.BRIGHT
+        elif record.levelno >= logging.WARNING:
+            color = Fore.YELLOW + Style.BRIGHT
+        elif record.levelno >= logging.INFO:
+            color = Fore.WHITE
+        else:
+            color = Fore.CYAN
+        return f"{color}{message}{Style.RESET_ALL}"
 
 
 def configure_logging(level: str = "INFO") -> None:
-    """Configure root logging with deterministic JSON output."""
+    """Configure root logging with colorized terminal output."""
+    colorama_init(autoreset=True)
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level.upper())
     handler = logging.StreamHandler()
-    handler.setFormatter(JsonLogFormatter())
+    handler.setFormatter(ColorLogFormatter())
     root.addHandler(handler)
