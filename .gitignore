@@ -340,3 +340,8 @@ cython_debug/
 .texlive/
 *.backup
 auto/
+
+# Project-generated runtime artifacts
+/artifacts/
+/runs/
+/logs/

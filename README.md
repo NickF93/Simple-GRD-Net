@@ -246,6 +246,9 @@ calibration_dir: ./mvtec
 mask_dir: null
 ```
 
+When a split root points to MVTec benchmark root (`mvtec/<category>/...` layout), commands now run
+per-category automatically: one model/checkpoint/report set per category.
+
 Per-category configuration is also supported:
 
 ```text
@@ -318,39 +321,154 @@ grdnet train -c configs/profiles/grdnet_2023_full.yaml
 Calibrate threshold:
 
 ```bash
-grdnet calibrate -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026/epoch_0010.pt
+grdnet calibrate -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
 ```
 
 Evaluate:
 
 ```bash
-grdnet eval -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026/epoch_0010.pt
+grdnet eval -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
 ```
 
 Infer:
 
 ```bash
-grdnet infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026/epoch_0010.pt
+grdnet infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
 ```
 
-### 6.1 DeepIndustrial-SN Training + Benchmark Command Checklist
+### 6.1 Quick Command Checklist
 
 Run from repository root:
 
 ```bash
 python main.py validate-config -c configs/profiles/deepindustrial_sn_2026.yaml
-
 python main.py train -c configs/profiles/deepindustrial_sn_2026.yaml
+python main.py calibrate -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
+python main.py eval -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
+python main.py infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
+```
 
-CKPT=$(ls -1 artifacts/checkpoints/deepindustrial_sn_2026/epoch_*.pt | sort | tail -n 1)
+### 6.2 Single-Category Experiment (One Model)
+
+Use this mode when you want one model for one MVTec class (for example `hazelnut`).
+
+1. Copy the profile YAML and rename it (example):
+
+```bash
+cp configs/profiles/deepindustrial_sn_2026.yaml configs/profiles/deepindustrial_sn_2026_hazelnut.yaml
+```
+
+2. In `configs/profiles/deepindustrial_sn_2026_hazelnut.yaml`, set category-specific roots and artifacts:
+
+```yaml
+data:
+  train_dir: "./mvtec/hazelnut"
+  val_dir: null
+  test_dir: "./mvtec/hazelnut"
+  calibration_dir: "./mvtec/hazelnut"
+  mask_dir: null
+
+training:
+  checkpoint_dir: "./artifacts/checkpoints/deepindustrial_sn_2026/hazelnut"
+  output_dir: "./artifacts/reports/deepindustrial_sn_2026/hazelnut"
+```
+
+3. Run full pipeline:
+
+```bash
+CFG=configs/profiles/deepindustrial_sn_2026_hazelnut.yaml
+
+python main.py validate-config -c "$CFG"
+python main.py train -c "$CFG"
+
+CKPT=$(ls -1 artifacts/checkpoints/deepindustrial_sn_2026/hazelnut/epoch_*.pt | sort | tail -n 1)
 echo "$CKPT"
 
-python main.py calibrate -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint "$CKPT"
-
-python main.py eval -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint "$CKPT"
-
-python main.py infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint "$CKPT"
+python main.py calibrate -c "$CFG" --checkpoint "$CKPT"
+python main.py eval -c "$CFG" --checkpoint "$CKPT"
+python main.py infer -c "$CFG" --checkpoint "$CKPT"
 ```
+
+4. Data usage in this mode:
+
+- Training reads `./mvtec/hazelnut/train/good/*` only (`nominal_train_only=true`).
+- Calibration reads `./mvtec/hazelnut/test/*` and masks from `./mvtec/hazelnut/ground_truth/*`.
+- Evaluation and inference use the same `test` and `ground_truth` roots.
+
+5. Output locations in this mode:
+
+- Checkpoints: `artifacts/checkpoints/deepindustrial_sn_2026/hazelnut/epoch_XXXX.pt`
+- Metrics/predictions: `artifacts/reports/deepindustrial_sn_2026/hazelnut/*.csv`
+
+### 6.3 Full MVTec Benchmark Mode (Automatic Category Loop)
+
+Use this mode for benchmark protocol: one independent model per category across the full dataset.
+
+1. Keep benchmark-root paths in YAML:
+
+```yaml
+data:
+  train_dir: "./mvtec"
+  test_dir: "./mvtec"
+  calibration_dir: "./mvtec"
+  mask_dir: null
+```
+
+2. Run commands once; runner auto-discovers categories and loops:
+
+```bash
+CFG=configs/profiles/deepindustrial_sn_2026.yaml
+
+python main.py validate-config -c "$CFG"
+python main.py train -c "$CFG"
+python main.py calibrate -c "$CFG" --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
+python main.py eval -c "$CFG" --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
+python main.py infer -c "$CFG" --checkpoint artifacts/checkpoints/deepindustrial_sn_2026
+```
+
+3. Category discovery rule:
+
+- A folder is treated as one category only if it contains all three subfolders:
+  `train/`, `test/`, and `ground_truth/`.
+- Example discovered categories: `bottle`, `capsule`, `hazelnut`, `zipper`, etc.
+
+4. Per-category data mapping in benchmark mode:
+
+- Train on `mvtec/<category>/train/good/*` (with default `nominal_train_only=true`).
+- Calibrate on `mvtec/<category>/test/*` with masks resolved from `mvtec/<category>/ground_truth/*`.
+- Evaluate/infer on the same category `test` split.
+
+5. Checkpoint argument behavior in benchmark mode:
+
+- Directory mode (recommended):
+  `--checkpoint artifacts/checkpoints/deepindustrial_sn_2026`
+  The runner loads latest `epoch_*.pt` from each category subfolder.
+- Template mode (explicit):
+  `--checkpoint "artifacts/checkpoints/deepindustrial_sn_2026/{category}/epoch_0010.pt"`
+
+6. Artifact structure in benchmark mode:
+
+```text
+artifacts/
+  checkpoints/
+    deepindustrial_sn_2026/
+      bottle/epoch_XXXX.pt
+      capsule/epoch_XXXX.pt
+      ...
+  reports/
+    deepindustrial_sn_2026/
+      bottle/metrics.csv
+      bottle/predictions.csv
+      capsule/metrics.csv
+      capsule/predictions.csv
+      ...
+```
+
+7. Expected benchmark log signals:
+
+- `benchmark_mode command=train categories=...`
+- `benchmark_category_start command=<train|calibrate|eval|infer> category=<name>`
+- `benchmark_category_done ...`
 
 Troubleshooting:
 
@@ -361,6 +479,8 @@ Troubleshooting:
 ## 7. Output Artifacts
 
 Artifacts are written under `training.output_dir` and `training.checkpoint_dir` from YAML:
+
+- In benchmark-root mode, artifacts are nested by category (for example `.../bottle`, `.../zipper`).
 
 - `metrics.csv`: epoch and evaluation metrics.
 - `predictions.csv`: patch-wise scores/predictions plus image-level aggregation fields (`image_prediction`, `anomalous_patch_ratio`).

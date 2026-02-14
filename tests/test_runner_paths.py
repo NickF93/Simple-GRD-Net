@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from grdnet.config.loader import load_experiment_config
 from grdnet.pipeline import runner
 
 
@@ -225,3 +226,308 @@ def test_run_infer_uses_calibration_when_threshold_missing(monkeypatch) -> None:
     assert runner.run_infer("cfg.yaml", checkpoint=None) == 0
     assert calls["calibrate"] == 1
     assert calls["infer"] == 1
+
+
+def test_run_train_benchmark_root_trains_one_model_per_category(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mvtec"
+    for category in ("bottle", "zipper"):
+        (root / category / "train").mkdir(parents=True, exist_ok=True)
+        (root / category / "test").mkdir(parents=True, exist_ok=True)
+        (root / category / "ground_truth").mkdir(parents=True, exist_ok=True)
+
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.data.train_dir = root
+    cfg.data.test_dir = root
+    cfg.data.calibration_dir = root
+    cfg.training.checkpoint_dir = tmp_path / "checkpoints"
+    cfg.training.output_dir = tmp_path / "reports"
+
+    created_train_dirs: list[str] = []
+    train_calls: list[str] = []
+
+    class _DataModuleStub:
+        def __init__(self, data_cfg) -> None:
+            _ = data_cfg
+
+        def train_loader(self):
+            return [{"x": 1}]
+
+        def val_loader(self):
+            return [{"x": 1}]
+
+    class _TrainingEngineStub:
+        def __init__(self, *, cfg, backend, reporters) -> None:
+            _ = backend, reporters
+            train_calls.append(str(cfg.data.train_dir))
+
+        def train(self, train_loader, val_loader) -> None:
+            _ = train_loader, val_loader
+
+    def _create_backend_spy(in_cfg):
+        created_train_dirs.append(str(in_cfg.data.train_dir))
+        return object()
+
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._setup",
+        lambda config_path: (cfg, object(), object(), []),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.configure_logging", lambda level: None)
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.set_global_seed",
+        lambda seed, deterministic: None,
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.create_backend", _create_backend_spy)
+    monkeypatch.setattr("grdnet.pipeline.runner.DataModule", _DataModuleStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.TrainingEngine", _TrainingEngineStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.ConsoleReporter", lambda: object())
+    monkeypatch.setattr("grdnet.pipeline.runner.CsvReporter", lambda in_cfg: object())
+
+    assert runner.run_train("cfg.yaml") == 0
+    assert created_train_dirs == [
+        str(root / "bottle"),
+        str(root / "zipper"),
+    ]
+    assert train_calls == [
+        str(root / "bottle"),
+        str(root / "zipper"),
+    ]
+
+
+def test_run_calibrate_benchmark_root_resolves_category_checkpoints(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mvtec"
+    for category in ("bottle", "zipper"):
+        (root / category / "train").mkdir(parents=True, exist_ok=True)
+        (root / category / "test").mkdir(parents=True, exist_ok=True)
+        (root / category / "ground_truth").mkdir(parents=True, exist_ok=True)
+
+    checkpoint_root = tmp_path / "checkpoints"
+    (checkpoint_root / "bottle").mkdir(parents=True, exist_ok=True)
+    (checkpoint_root / "zipper").mkdir(parents=True, exist_ok=True)
+    (checkpoint_root / "bottle" / "epoch_0007.pt").write_text("", encoding="utf-8")
+    (checkpoint_root / "zipper" / "epoch_0011.pt").write_text("", encoding="utf-8")
+
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.data.train_dir = root
+    cfg.data.test_dir = root
+    cfg.data.calibration_dir = root
+    cfg.training.checkpoint_dir = tmp_path / "checkpoints_out"
+    cfg.training.output_dir = tmp_path / "reports_out"
+
+    loaded_checkpoints: list[str] = []
+
+    class _DataModuleStub:
+        def __init__(self, data_cfg) -> None:
+            _ = data_cfg
+
+        def calibration_loader(self):
+            return [{"x": 1}]
+
+    class _InferenceEngineStub:
+        def __init__(self, *, cfg, backend, reporters) -> None:
+            _ = cfg, backend, reporters
+
+        def calibrate(self, loader) -> float:
+            _ = loader
+            return 0.2
+
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._setup",
+        lambda config_path: (cfg, object(), object(), []),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.configure_logging", lambda level: None)
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.set_global_seed",
+        lambda seed, deterministic: None,
+    )
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.create_backend",
+        lambda in_cfg: object(),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.DataModule", _DataModuleStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.InferenceEngine", _InferenceEngineStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.ConsoleReporter", lambda: object())
+    monkeypatch.setattr("grdnet.pipeline.runner.CsvReporter", lambda in_cfg: object())
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._maybe_load_checkpoint",
+        lambda backend, checkpoint: loaded_checkpoints.append(str(checkpoint)),
+    )
+
+    assert runner.run_calibrate("cfg.yaml", checkpoint=str(checkpoint_root)) == 0
+    assert loaded_checkpoints == [
+        str(checkpoint_root / "bottle" / "epoch_0007.pt"),
+        str(checkpoint_root / "zipper" / "epoch_0011.pt"),
+    ]
+
+
+def test_run_evaluate_benchmark_root_runs_per_category(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mvtec"
+    for category in ("bottle", "zipper"):
+        (root / category / "train").mkdir(parents=True, exist_ok=True)
+        (root / category / "test").mkdir(parents=True, exist_ok=True)
+        (root / category / "ground_truth").mkdir(parents=True, exist_ok=True)
+
+    checkpoint_root = tmp_path / "checkpoints"
+    (checkpoint_root / "bottle").mkdir(parents=True, exist_ok=True)
+    (checkpoint_root / "zipper").mkdir(parents=True, exist_ok=True)
+    (checkpoint_root / "bottle" / "epoch_0004.pt").write_text("", encoding="utf-8")
+    (checkpoint_root / "zipper" / "epoch_0006.pt").write_text("", encoding="utf-8")
+
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.data.train_dir = root
+    cfg.data.test_dir = root
+    cfg.data.calibration_dir = root
+    cfg.training.checkpoint_dir = tmp_path / "checkpoints_out"
+    cfg.training.output_dir = tmp_path / "reports_out"
+    cfg.inference.anomaly_threshold = 0.33
+
+    loaded_checkpoints: list[str] = []
+    evaluated_categories: list[str] = []
+
+    class _DataModuleStub:
+        def __init__(self, data_cfg) -> None:
+            self._data_cfg = data_cfg
+
+        def test_loader(self):
+            return [{"x": 1}]
+
+        def calibration_loader(self):
+            return [{"x": 1}]
+
+    class _InferenceEngineStub:
+        def __init__(self, *, cfg, backend, reporters) -> None:
+            _ = backend, reporters
+            self._cfg = cfg
+
+        def calibrate(self, loader) -> float:
+            _ = loader
+            return 0.2
+
+        def evaluate(self, loader, threshold):
+            _ = loader, threshold
+            evaluated_categories.append(self._cfg.profile.name)
+            return {"accuracy": 1.0}
+
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._setup",
+        lambda config_path: (cfg, object(), object(), []),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.configure_logging", lambda level: None)
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.set_global_seed",
+        lambda seed, deterministic: None,
+    )
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.create_backend",
+        lambda in_cfg: object(),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.DataModule", _DataModuleStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.InferenceEngine", _InferenceEngineStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.ConsoleReporter", lambda: object())
+    monkeypatch.setattr("grdnet.pipeline.runner.CsvReporter", lambda in_cfg: object())
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._maybe_load_checkpoint",
+        lambda backend, checkpoint: loaded_checkpoints.append(str(checkpoint)),
+    )
+
+    assert runner.run_evaluate("cfg.yaml", checkpoint=str(checkpoint_root)) == 0
+    assert loaded_checkpoints == [
+        str(checkpoint_root / "bottle" / "epoch_0004.pt"),
+        str(checkpoint_root / "zipper" / "epoch_0006.pt"),
+    ]
+    assert evaluated_categories == [
+        "DeepIndustrial-SN 2026 Official [bottle]",
+        "DeepIndustrial-SN 2026 Official [zipper]",
+    ]
+
+
+def test_run_infer_benchmark_root_runs_per_category(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mvtec"
+    for category in ("bottle", "zipper"):
+        (root / category / "train").mkdir(parents=True, exist_ok=True)
+        (root / category / "test").mkdir(parents=True, exist_ok=True)
+        (root / category / "ground_truth").mkdir(parents=True, exist_ok=True)
+
+    checkpoint_root = tmp_path / "checkpoints"
+    (checkpoint_root / "bottle").mkdir(parents=True, exist_ok=True)
+    (checkpoint_root / "zipper").mkdir(parents=True, exist_ok=True)
+    (checkpoint_root / "bottle" / "epoch_0008.pt").write_text("", encoding="utf-8")
+    (checkpoint_root / "zipper" / "epoch_0009.pt").write_text("", encoding="utf-8")
+
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.data.train_dir = root
+    cfg.data.test_dir = root
+    cfg.data.calibration_dir = root
+    cfg.training.checkpoint_dir = tmp_path / "checkpoints_out"
+    cfg.training.output_dir = tmp_path / "reports_out"
+    cfg.inference.anomaly_threshold = 0.33
+
+    loaded_checkpoints: list[str] = []
+    inferred_categories: list[str] = []
+
+    class _DataModuleStub:
+        def __init__(self, data_cfg) -> None:
+            self._data_cfg = data_cfg
+
+        def test_loader(self):
+            return [{"x": 1}]
+
+        def calibration_loader(self):
+            return [{"x": 1}]
+
+    class _InferenceEngineStub:
+        def __init__(self, *, cfg, backend, reporters) -> None:
+            _ = backend, reporters
+            self._cfg = cfg
+
+        def calibrate(self, loader) -> float:
+            _ = loader
+            return 0.2
+
+        def infer(self, loader, threshold):
+            _ = loader, threshold
+            inferred_categories.append(self._cfg.profile.name)
+            return 1
+
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._setup",
+        lambda config_path: (cfg, object(), object(), []),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.configure_logging", lambda level: None)
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.set_global_seed",
+        lambda seed, deterministic: None,
+    )
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner.create_backend",
+        lambda in_cfg: object(),
+    )
+    monkeypatch.setattr("grdnet.pipeline.runner.DataModule", _DataModuleStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.InferenceEngine", _InferenceEngineStub)
+    monkeypatch.setattr("grdnet.pipeline.runner.ConsoleReporter", lambda: object())
+    monkeypatch.setattr("grdnet.pipeline.runner.CsvReporter", lambda in_cfg: object())
+    monkeypatch.setattr(
+        "grdnet.pipeline.runner._maybe_load_checkpoint",
+        lambda backend, checkpoint: loaded_checkpoints.append(str(checkpoint)),
+    )
+
+    assert runner.run_infer("cfg.yaml", checkpoint=str(checkpoint_root)) == 0
+    assert loaded_checkpoints == [
+        str(checkpoint_root / "bottle" / "epoch_0008.pt"),
+        str(checkpoint_root / "zipper" / "epoch_0009.pt"),
+    ]
+    assert inferred_categories == [
+        "DeepIndustrial-SN 2026 Official [bottle]",
+        "DeepIndustrial-SN 2026 Official [zipper]",
+    ]
