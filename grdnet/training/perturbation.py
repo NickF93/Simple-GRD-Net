@@ -14,7 +14,13 @@ def _lerp(a: torch.Tensor, b: torch.Tensor, weight: torch.Tensor) -> torch.Tenso
     return a + weight * (b - a)
 
 
-def _perlin_2d(height: int, width: int, res_h: int, res_w: int, device: torch.device) -> torch.Tensor:
+def _perlin_2d(
+    height: int,
+    width: int,
+    res_h: int,
+    res_w: int,
+    device: torch.device,
+) -> torch.Tensor:
     """Generate a 2D Perlin map in [-1, 1]."""
     delta_h = res_h / height
     delta_w = res_w / width
@@ -48,10 +54,16 @@ def _perlin_2d(height: int, width: int, res_h: int, res_w: int, device: torch.de
     n01 = dot(tile(0, -1, 1, None), 0.0, -1.0)
     n11 = dot(tile(1, None, 1, None), -1.0, -1.0)
 
-    fade = lambda t: 6 * t**5 - 15 * t**4 + 10 * t**3
-    t = fade(grid[:height, :width])
+    def fade_curve(values: torch.Tensor) -> torch.Tensor:
+        return 6 * values**5 - 15 * values**4 + 10 * values**3
 
-    return math.sqrt(2.0) * _lerp(_lerp(n00, n10, t[..., 0]), _lerp(n01, n11, t[..., 0]), t[..., 1])
+    t = fade_curve(grid[:height, :width])
+
+    return math.sqrt(2.0) * _lerp(
+        _lerp(n00, n10, t[..., 0]),
+        _lerp(n01, n11, t[..., 0]),
+        t[..., 1],
+    )
 
 
 def _sample_masked_noise(
@@ -88,24 +100,30 @@ def apply_geometry_augmentation(
     """Apply deterministic-shape augmentations sample-wise."""
     out_images = []
     out_masks = []
-    for image, roi in zip(images, roi_masks, strict=True):
+    for image_sample, roi_sample in zip(images, roi_masks, strict=True):
         # rotation range is profile-driven and defaults to the simple variant values.
-        angle = float(
-            torch.empty(1).uniform_(cfg.rotation_degrees[0], cfg.rotation_degrees[1]).item()
+        angle = float(torch.empty(1).uniform_(*cfg.rotation_degrees).item())
+        augmented_image = rotate(
+            image_sample,
+            angle=angle,
+            interpolation=InterpolationMode.BILINEAR,
         )
-        image = rotate(image, angle=angle, interpolation=InterpolationMode.BILINEAR)
-        roi = rotate(roi, angle=angle, interpolation=InterpolationMode.NEAREST)
+        augmented_roi = rotate(
+            roi_sample,
+            angle=angle,
+            interpolation=InterpolationMode.NEAREST,
+        )
 
         if torch.rand(1).item() < cfg.horizontal_flip_probability:
-            image = torch.flip(image, dims=[2])
-            roi = torch.flip(roi, dims=[2])
+            augmented_image = torch.flip(augmented_image, dims=[2])
+            augmented_roi = torch.flip(augmented_roi, dims=[2])
 
         if torch.rand(1).item() < cfg.vertical_flip_probability:
-            image = torch.flip(image, dims=[1])
-            roi = torch.flip(roi, dims=[1])
+            augmented_image = torch.flip(augmented_image, dims=[1])
+            augmented_roi = torch.flip(augmented_roi, dims=[1])
 
-        out_images.append(image)
-        out_masks.append((roi > 0.5).to(dtype=torch.float32))
+        out_images.append(augmented_image)
+        out_masks.append((augmented_roi > 0.5).to(dtype=torch.float32))
 
     return torch.stack(out_images, dim=0), torch.stack(out_masks, dim=0)
 
@@ -157,6 +175,9 @@ def apply_gaussian_noise(images: torch.Tensor, sigma_max: float) -> torch.Tensor
     if sigma_max <= 0.0:
         return images
 
-    sigma = torch.empty((images.shape[0], 1, 1, 1), device=images.device).uniform_(0.0, sigma_max)
+    sigma = torch.empty(
+        (images.shape[0], 1, 1, 1),
+        device=images.device,
+    ).uniform_(0.0, sigma_max)
     noise = torch.randn_like(images) * sigma
     return (images + noise).clamp(0.0, 1.0)

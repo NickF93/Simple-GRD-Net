@@ -63,7 +63,7 @@ class DataConfig(BaseModel):
         """Parse square shorthand into explicit (height, width) pairs."""
         if isinstance(value, int):
             return (value, value)
-        if isinstance(value, (tuple, list)) and len(value) == 2:
+        if isinstance(value, tuple | list) and len(value) == 2:
             first = int(value[0])
             second = int(value[1])
             return (first, second)

@@ -35,13 +35,28 @@ class UNetSegmentator(nn.Module):
 
         self.mid = _ConvBlock(base_features * 4, base_features * 8)
 
-        self.up3 = nn.ConvTranspose2d(base_features * 8, base_features * 4, kernel_size=2, stride=2)
+        self.up3 = nn.ConvTranspose2d(
+            base_features * 8,
+            base_features * 4,
+            kernel_size=2,
+            stride=2,
+        )
         self.dec3 = _ConvBlock(base_features * 8, base_features * 4)
 
-        self.up2 = nn.ConvTranspose2d(base_features * 4, base_features * 2, kernel_size=2, stride=2)
+        self.up2 = nn.ConvTranspose2d(
+            base_features * 4,
+            base_features * 2,
+            kernel_size=2,
+            stride=2,
+        )
         self.dec2 = _ConvBlock(base_features * 4, base_features * 2)
 
-        self.up1 = nn.ConvTranspose2d(base_features * 2, base_features, kernel_size=2, stride=2)
+        self.up1 = nn.ConvTranspose2d(
+            base_features * 2,
+            base_features,
+            kernel_size=2,
+            stride=2,
+        )
         self.dec1 = _ConvBlock(base_features * 2, base_features)
 
         self.out = nn.Sequential(

@@ -30,9 +30,15 @@ def anomaly_score_ssim_per_sample(x: torch.Tensor, y: torch.Tensor) -> torch.Ten
     mu_x = functional.avg_pool2d(x, window_size, stride=1, padding=pad)
     mu_y = functional.avg_pool2d(y, window_size, stride=1, padding=pad)
 
-    sigma_x = functional.avg_pool2d(x * x, window_size, stride=1, padding=pad) - mu_x * mu_x
-    sigma_y = functional.avg_pool2d(y * y, window_size, stride=1, padding=pad) - mu_y * mu_y
-    sigma_xy = functional.avg_pool2d(x * y, window_size, stride=1, padding=pad) - mu_x * mu_y
+    sigma_x = (
+        functional.avg_pool2d(x * x, window_size, stride=1, padding=pad) - mu_x * mu_x
+    )
+    sigma_y = (
+        functional.avg_pool2d(y * y, window_size, stride=1, padding=pad) - mu_y * mu_y
+    )
+    sigma_xy = (
+        functional.avg_pool2d(x * y, window_size, stride=1, padding=pad) - mu_x * mu_y
+    )
 
     numerator = (2.0 * mu_x * mu_y + c1) * (2.0 * sigma_xy + c2)
     denominator = (mu_x * mu_x + mu_y * mu_y + c1) * (sigma_x + sigma_y + c2)

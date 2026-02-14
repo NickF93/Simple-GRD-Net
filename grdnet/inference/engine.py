@@ -87,7 +87,6 @@ class InferenceEngine:
         for path in ordered_paths:
             indices = groups[path]
             labels = patch_labels[indices]
-            scores = patch_scores[indices]
             preds = patch_preds[indices]
 
             anomaly_ratio = float(np.mean(preds))

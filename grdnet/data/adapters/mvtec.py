@@ -55,13 +55,13 @@ class MvtecLikeDataset(Dataset):
 
     def _load_image(self, path: Path) -> torch.Tensor:
         mode = "L" if self._cfg.channels == 1 else "RGB"
-        with Image.open(path) as image:
-            image = image.convert(mode)
-            image = image.resize(
+        with Image.open(path) as image_handle:
+            converted = image_handle.convert(mode)
+            resized = converted.resize(
                 (self._cfg.image_size, self._cfg.image_size),
                 Image.Resampling.BILINEAR,
             )
-            array = np.asarray(image, dtype=np.float32) / 255.0
+            array = np.asarray(resized, dtype=np.float32) / 255.0
 
         if self._cfg.channels == 1:
             array = np.expand_dims(array, axis=-1)
@@ -70,13 +70,13 @@ class MvtecLikeDataset(Dataset):
         return tensor
 
     def _load_binary_mask(self, mask_path: Path) -> torch.Tensor:
-        with Image.open(mask_path) as image:
-            image = image.convert("L")
-            image = image.resize(
+        with Image.open(mask_path) as image_handle:
+            converted = image_handle.convert("L")
+            resized = converted.resize(
                 (self._cfg.image_size, self._cfg.image_size),
                 Image.Resampling.NEAREST,
             )
-            array = np.asarray(image, dtype=np.float32) / 255.0
+            array = np.asarray(resized, dtype=np.float32) / 255.0
 
         return torch.from_numpy((array > 0.5).astype(np.float32)).unsqueeze(0)
 

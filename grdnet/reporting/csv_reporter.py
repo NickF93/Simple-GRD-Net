@@ -17,12 +17,19 @@ class CsvReporter(Reporter):
         self._output_dir = cfg.training.output_dir
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._metrics_path = self._output_dir / cfg.reporting.csv_metrics_filename
-        self._predictions_path = self._output_dir / cfg.reporting.csv_predictions_filename
+        self._predictions_path = (
+            self._output_dir / cfg.reporting.csv_predictions_filename
+        )
 
         self._metrics_header_written = self._metrics_path.exists()
 
     @staticmethod
-    def _write_rows(path: Path, rows: list[dict[str, str | float | int]], *, header_written: bool) -> bool:
+    def _write_rows(
+        path: Path,
+        rows: list[dict[str, str | float | int]],
+        *,
+        header_written: bool,
+    ) -> bool:
         if not rows:
             return header_written
 

@@ -23,13 +23,27 @@ def _build_parser() -> argparse.ArgumentParser:
     train = subparsers.add_parser("train", help="Train according to profile config")
     train.add_argument("-c", "--config", required=True, help="Path to YAML config")
 
-    calibrate = subparsers.add_parser("calibrate", help="Calibrate threshold on calibration split")
+    calibrate = subparsers.add_parser(
+        "calibrate",
+        help="Calibrate threshold on calibration split",
+    )
     calibrate.add_argument("-c", "--config", required=True, help="Path to YAML config")
-    calibrate.add_argument("--checkpoint", default=None, help="Optional checkpoint path")
+    calibrate.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Optional checkpoint path",
+    )
 
-    evaluate = subparsers.add_parser("eval", help="Evaluate thresholded metrics on test split")
+    evaluate = subparsers.add_parser(
+        "eval",
+        help="Evaluate thresholded metrics on test split",
+    )
     evaluate.add_argument("-c", "--config", required=True, help="Path to YAML config")
-    evaluate.add_argument("--checkpoint", default=None, help="Optional checkpoint path")
+    evaluate.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Optional checkpoint path",
+    )
 
     infer = subparsers.add_parser("infer", help="Run inference and export predictions")
     infer.add_argument("-c", "--config", required=True, help="Path to YAML config")

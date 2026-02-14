@@ -39,7 +39,13 @@ class ResidualBlock(nn.Module):
 
         if stride != 1 or in_channels != out_channels:
             self.proj = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ),
                 nn.BatchNorm2d(out_channels),
             )
         else:
@@ -56,10 +62,22 @@ class ResidualBlock(nn.Module):
 class ResidualEncoder(nn.Module):
     """Configurable residual encoder used by generator and discriminator."""
 
-    def __init__(self, in_channels: int, base_features: int, stages: tuple[int, ...]) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        base_features: int,
+        stages: tuple[int, ...],
+    ) -> None:
         super().__init__()
         self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, base_features, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Conv2d(
+                in_channels,
+                base_features,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
             nn.BatchNorm2d(base_features),
             nn.LeakyReLU(0.2, inplace=True),
         )
@@ -116,7 +134,9 @@ class ResidualDecoder(nn.Module):
                         )
                     )
                 else:
-                    modules.append(ResidualBlock(target_channels, target_channels, stride=1))
+                    modules.append(
+                        ResidualBlock(target_channels, target_channels, stride=1)
+                    )
                 channels = target_channels
 
         self.blocks = nn.Sequential(*modules)
