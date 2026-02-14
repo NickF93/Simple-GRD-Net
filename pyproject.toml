@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simple-grd-net"
+version = "1.0.0"
+description = "Official configurable implementation of GRD-Net and DeepIndustrial-SN variant"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Niccolo Ferrari" }
+]
+license = { file = "LICENSE" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+[project.scripts]
+grdnet = "grdnet.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["grdnet*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PL", "D"]
+ignore = ["PLR0913", "PLR2004", "D105", "D107", "D203", "D213", "D401", "D413"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["D"]
+"grdnet/**/__init__.py" = ["D104"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+exclude = [
+  "^tests/"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]

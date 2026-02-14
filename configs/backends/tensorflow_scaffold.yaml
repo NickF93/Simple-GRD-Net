@@ -1,0 +1,4 @@
+backend:
+  name: "tensorflow_scaffold"
+  device: "cpu"
+  mixed_precision: false

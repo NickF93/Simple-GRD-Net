@@ -1,0 +1,11 @@
+[run]
+branch = True
+source =
+    grdnet
+
+[report]
+skip_empty = True
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:

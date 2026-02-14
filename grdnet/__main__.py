@@ -1,4 +1,4 @@
-"""CLI entrypoint forwarding to package command dispatcher."""
+"""Module entrypoint for `python -m grdnet`."""
 
 from grdnet.cli import main
 

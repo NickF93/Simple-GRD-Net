@@ -1,0 +1,95 @@
+profile:
+  name: "GRD-Net 2023 Official"
+  mode: "grdnet_2023_full"
+  use_segmentator: true
+
+backend:
+  name: "pytorch"
+  device: "auto"
+  mixed_precision: false
+
+system:
+  seed: 1337
+  deterministic: true
+  log_level: "INFO"
+
+data:
+  # MVTec benchmark root (repository symlink).
+  # The datamodule auto-detects category folders and split subdirs.
+  train_dir: "./mvtec"
+  val_dir: null
+  test_dir: "./mvtec"
+  calibration_dir: "./mvtec"
+  roi_dir: null
+  mask_dir: null
+  class_good_name: "good"
+  image_size: 256
+  channels: 3
+  batch_size: 8
+  num_workers: 4
+  patch_size: [128, 128]
+  patch_stride: [64, 64]
+  nominal_train_only: true
+
+augmentation:
+  perlin_probability: 0.75
+  perlin_min_area: 25
+  rotation_degrees: [-90.0, 90.0]
+  horizontal_flip_probability: 0.5
+  vertical_flip_probability: 0.5
+  gaussian_noise_std_max: 0.05
+
+model:
+  base_features: 64
+  latent_dim: 256
+  stages: [2, 2, 2, 2]
+  # Paper-canonical convention: resample on the last block of each stage.
+  # Ablation alternative (non-canonical): "first"
+  # encoder_downsample_position: "first"
+  # decoder_upsample_position: "first"
+  encoder_downsample_position: "last"
+  decoder_upsample_position: "last"
+  dense_bottleneck: false
+  segmentator_base_features: 64
+
+losses:
+  wa: 1.0
+  wb: 1.0
+  w1: 1.0
+  w2: 50.0
+  w3: 1.0
+  w4: 0.0
+  contextual_base: "l1"
+  use_noise_regularization: false
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+
+optimizer:
+  lr_generator: 0.0001
+  lr_discriminator: 0.0001
+  lr_segmentator: 0.0001
+  weight_decay: 0.0000
+  adam_betas: [0.5, 0.999]
+
+scheduler:
+  first_restart_steps: 2500
+  restart_t_mult: 2.0
+  restart_gamma: 0.75
+  step_unit: "epoch"
+
+training:
+  epochs: 200
+  log_interval: 20
+  eval_interval: 1
+  checkpoint_dir: "./artifacts/checkpoints/grdnet_2023_full"
+  output_dir: "./artifacts/reports/grdnet_2023_full"
+  max_grad_norm: 1.0
+
+inference:
+  anomaly_threshold: null
+  run_acceptance_ratio: 0.70
+  scoring_strategy: "profile_default"
+
+reporting:
+  csv_metrics_filename: "metrics.csv"
+  csv_predictions_filename: "predictions.csv"

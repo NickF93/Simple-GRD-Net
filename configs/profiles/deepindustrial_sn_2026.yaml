@@ -1,0 +1,106 @@
+profile:
+  name: "DeepIndustrial-SN 2026 Official"
+  mode: "deepindustrial_sn_2026"
+  use_segmentator: false
+
+backend:
+  name: "pytorch"
+  device: "auto"
+  mixed_precision: false
+
+system:
+  seed: 1337
+  deterministic: true
+  log_level: "INFO"
+
+data:
+  # MVTec benchmark root (repository symlink).
+  # The datamodule auto-detects category folders and split subdirs.
+  train_dir: "./mvtec"
+  val_dir: null
+  test_dir: "./mvtec"
+  calibration_dir: "./mvtec"
+  roi_dir: null
+  mask_dir: null
+  class_good_name: "good"
+  image_size: 256
+  channels: 3
+  # Conservative default for 5-6 GB GPUs. Use 32 on larger GPUs for paper-scale runs.
+  batch_size: 16
+  num_workers: 4
+  patch_size: [256, 256]
+  patch_stride: [256, 256]
+  nominal_train_only: true
+
+augmentation:
+  perlin_probability: 0.75
+  perlin_min_area: 25
+  rotation_degrees: [-22.5, 22.5]
+  horizontal_flip_probability: 0.0
+  vertical_flip_probability: 0.5
+  gaussian_noise_std_max: 0.03
+
+model:
+  # Paper-aligned default: 4 stages, 3 residual blocks per stage, final 16x16x1024.
+  # Ablation alternative (previous lightweight setting):
+  #base_features: 64
+  #stages: [2, 2, 2, 2]
+  # Paper-canonical convention: resample on the last block of each stage.
+  # Ablation alternative (non-canonical): "first"
+  #encoder_downsample_position: "first"
+  #decoder_upsample_position: "first"
+  base_features: 128
+  latent_dim: 128
+  stages: [2, 2, 2, 2]
+  encoder_downsample_position: "first"
+  decoder_upsample_position: "first"
+  dense_bottleneck: true
+  segmentator_base_features: 64
+
+losses:
+  wa: 2.0
+  wb: 1.0
+  w1: 1.0
+  w2: 50.0
+  w3: 1.0
+  w4: 3.0
+  contextual_base: "huber"
+  use_noise_regularization: true
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+
+optimizer:
+  lr_generator: 0.00015
+  lr_discriminator: 0.00015
+  lr_segmentator: 0.00015
+  weight_decay: 0.0000
+  adam_betas: [0.5, 0.999]
+
+scheduler:
+  first_restart_steps: 2533680
+  restart_t_mult: 2.0
+  restart_gamma: 0.3333
+  step_unit: "step"
+
+training:
+  epochs: 200
+  log_interval: 20
+  eval_interval: 1
+  checkpoint_dir: "./artifacts/checkpoints/deepindustrial_sn_2026"
+  output_dir: "./artifacts/reports/deepindustrial_sn_2026"
+  max_grad_norm: 1.0
+
+inference:
+  anomaly_threshold: null
+  run_acceptance_ratio: 0.70
+  scoring_strategy: "profile_default"
+
+reporting:
+  csv_metrics_filename: "metrics.csv"
+  csv_predictions_filename: "predictions.csv"
+  train_batch_preview:
+    enabled: true
+    every_n_epochs: 1
+    step_index: 1
+    max_images: 8
+    subdir: "train_batch_previews"
