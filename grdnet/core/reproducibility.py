@@ -45,8 +45,8 @@ def set_global_seed(seed: int, deterministic: bool) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    # Avoid CUDA runtime probing here; it can emit warnings in headless/CI setups.
+    torch.cuda.manual_seed_all(seed)
 
     os.environ["PYTHONHASHSEED"] = str(seed)
     if deterministic:

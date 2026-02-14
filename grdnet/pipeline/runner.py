@@ -154,8 +154,8 @@ def _setup_from_cfg(
     LOGGER.info("initializing_backend")
     backend = create_backend(cfg)
     validate_determinism_runtime(
-        deterministic=cfg.system.deterministic,
-        backend_name=cfg.backend.name,
+        deterministic=bool(getattr(system_cfg, "deterministic", False)),
+        backend_name=str(getattr(backend_cfg, "name", "<unknown>")),
         backend_device=getattr(backend, "device", None),
     )
     LOGGER.info("initializing_datamodule")

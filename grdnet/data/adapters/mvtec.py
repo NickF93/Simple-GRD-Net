@@ -51,13 +51,30 @@ class MvtecLikeDataset(Dataset):
         self._roi_root = roi_root
         self._mask_root = mask_root
         self._mask_enabled = mask_enabled
-        self._logged_missing_roi_root = False
-        self._logged_missing_roi_sample = False
-        self._logged_missing_mask_root = False
-        self._logged_missing_gt_mask = False
+        self._warned_events: set[str] = set()
+        self._zero_mask_template = torch.zeros(
+            (1, self._cfg.image_size, self._cfg.image_size),
+            dtype=torch.float32,
+        )
+        self._full_roi_mask_template = torch.ones(
+            (1, self._cfg.image_size, self._cfg.image_size),
+            dtype=torch.float32,
+        )
 
     def __len__(self) -> int:
         return len(self._samples)
+
+    def _zero_mask(self) -> torch.Tensor:
+        return self._zero_mask_template.clone()
+
+    def _full_roi_mask(self) -> torch.Tensor:
+        return self._full_roi_mask_template.clone()
+
+    def _warn_once(self, event: str, message: str, *args: object) -> None:
+        if event in self._warned_events:
+            return
+        LOGGER.warning(message, *args)
+        self._warned_events.add(event)
 
     def _load_image(self, path: Path) -> torch.Tensor:
         mode = "L" if self._cfg.channels == 1 else "RGB"
@@ -90,12 +107,11 @@ class MvtecLikeDataset(Dataset):
         if self._roi_root is None:
             return None
         if not self._roi_root.exists():
-            if not self._logged_missing_roi_root:
-                LOGGER.warning(
-                    "roi_root_not_found path=%s fallback=full_image_roi",
-                    self._roi_root,
-                )
-                self._logged_missing_roi_root = True
+            self._warn_once(
+                "missing_roi_root",
+                "roi_root_not_found path=%s fallback=full_image_roi",
+                self._roi_root,
+            )
             return None
 
         base = self._roi_root / sample.class_name / sample.class_relative_path
@@ -106,13 +122,12 @@ class MvtecLikeDataset(Dataset):
         for candidate in candidates:
             if candidate.exists():
                 return candidate
-        if not self._logged_missing_roi_sample:
-            LOGGER.warning(
-                "roi_mask_not_found sample=%s roi_root=%s fallback=full_image_roi",
-                sample.image_path,
-                self._roi_root,
-            )
-            self._logged_missing_roi_sample = True
+        self._warn_once(
+            "missing_roi_sample",
+            "roi_mask_not_found sample=%s roi_root=%s fallback=full_image_roi",
+            sample.image_path,
+            self._roi_root,
+        )
         return None
 
     def _resolve_gt_mask_path(self, sample: _IndexedSample) -> Path | None:
@@ -134,47 +149,30 @@ class MvtecLikeDataset(Dataset):
     def _load_roi_mask(self, sample: _IndexedSample) -> torch.Tensor:
         roi_path = self._resolve_roi_mask_path(sample)
         if roi_path is None:
-            return torch.ones(
-                (1, self._cfg.image_size, self._cfg.image_size),
-                dtype=torch.float32,
-            )
+            return self._full_roi_mask()
         return self._load_binary_mask(roi_path)
 
     def _load_gt_mask(self, sample: _IndexedSample) -> torch.Tensor:
         if not self._mask_enabled:
-            return torch.zeros(
-                (1, self._cfg.image_size, self._cfg.image_size),
-                dtype=torch.float32,
-            )
+            return self._zero_mask()
 
         if self._mask_root is None:
-            if not self._logged_missing_mask_root:
-                LOGGER.warning(
-                    "mask_root_not_set fallback=zero_mask_treat_as_good",
-                )
-                self._logged_missing_mask_root = True
-            return torch.zeros(
-                (1, self._cfg.image_size, self._cfg.image_size),
-                dtype=torch.float32,
+            self._warn_once(
+                "missing_mask_root",
+                "mask_root_not_set fallback=zero_mask_treat_as_good",
             )
+            return self._zero_mask()
 
         gt_mask_path = self._resolve_gt_mask_path(sample)
         if gt_mask_path is None:
             if sample.class_name == self._cfg.class_good_name:
-                return torch.zeros(
-                    (1, self._cfg.image_size, self._cfg.image_size),
-                    dtype=torch.float32,
-                )
-            if not self._logged_missing_gt_mask:
-                LOGGER.warning(
-                    "gt_mask_not_found sample=%s fallback=zero_mask_treat_as_good",
-                    sample.image_path,
-                )
-                self._logged_missing_gt_mask = True
-            return torch.zeros(
-                (1, self._cfg.image_size, self._cfg.image_size),
-                dtype=torch.float32,
+                return self._zero_mask()
+            self._warn_once(
+                "missing_gt_mask",
+                "gt_mask_not_found sample=%s fallback=zero_mask_treat_as_good",
+                sample.image_path,
             )
+            return self._zero_mask()
 
         return self._load_binary_mask(gt_mask_path)
 

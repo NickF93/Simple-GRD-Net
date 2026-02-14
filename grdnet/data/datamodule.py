@@ -52,6 +52,25 @@ class DataModule:
         }
         return mapping[split_kind]
 
+    @staticmethod
+    def _resolve_effective_mask_root(
+        *,
+        use_mask: bool,
+        configured_mask_root: Path | None,
+        inferred_mask_root: Path | None,
+        missing_message: str,
+    ) -> Path | None:
+        if not use_mask:
+            return None
+        effective = (
+            configured_mask_root
+            if configured_mask_root is not None
+            else inferred_mask_root
+        )
+        if effective is None:
+            raise DatasetContractError(missing_message)
+        return effective
+
     def _build_dataset(
         self,
         root: Path,
@@ -73,13 +92,14 @@ class DataModule:
         if self._is_mvtec_category_root(root):
             split_root = root / self._split_subdir(split_kind)
             inferred_mask_root = root / "ground_truth" if use_mask else None
-            effective_mask_root = (
-                mask_root if mask_root is not None else inferred_mask_root
-            )
-            if use_mask and effective_mask_root is None:
-                raise DatasetContractError(
+            effective_mask_root = self._resolve_effective_mask_root(
+                use_mask=use_mask,
+                configured_mask_root=mask_root,
+                inferred_mask_root=inferred_mask_root,
+                missing_message=(
                     "Unable to resolve mask root for MVTec category evaluation."
-                )
+                ),
+            )
             return self._adapter.build_dataset(
                 root=split_root,
                 nominal_only=nominal_only,
@@ -97,13 +117,14 @@ class DataModule:
                 inferred_mask_root = (
                     category_root / "ground_truth" if use_mask else None
                 )
-                effective_mask_root = (
-                    mask_root if mask_root is not None else inferred_mask_root
-                )
-                if use_mask and effective_mask_root is None:
-                    raise DatasetContractError(
+                effective_mask_root = self._resolve_effective_mask_root(
+                    use_mask=use_mask,
+                    configured_mask_root=mask_root,
+                    inferred_mask_root=inferred_mask_root,
+                    missing_message=(
                         "Unable to resolve mask root for MVTec benchmark evaluation."
-                    )
+                    ),
+                )
                 datasets.append(
                     self._adapter.build_dataset(
                         root=split_root,
