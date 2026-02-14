@@ -52,6 +52,29 @@ def test_discriminator_forward_shapes() -> None:
     assert probs.shape == (2, 1)
 
 
+def test_discriminator_head_outputs_logits_not_probabilities() -> None:
+    model = Discriminator(
+        in_channels=1,
+        base_features=8,
+        stages=(1, 1),
+        image_shape=(16, 16),
+    )
+    assert all(
+        not isinstance(module, nn.Sigmoid) for module in model.classifier.modules()
+    )
+
+    linear = model.classifier[1]
+    if not isinstance(linear, nn.Linear):
+        raise AssertionError("Expected Linear layer at discriminator head")
+    with torch.no_grad():
+        linear.weight.zero_()
+        linear.bias.fill_(2.5)
+
+    x = torch.rand((2, 1, 16, 16), dtype=torch.float32)
+    _, logits = model(x)
+    assert torch.all(logits > 1.0)
+
+
 def test_segmentator_forward_shape() -> None:
     model = UNetSegmentator(in_channels=2, base_features=8)
     x = torch.rand((3, 2, 16, 16), dtype=torch.float32)

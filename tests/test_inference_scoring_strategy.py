@@ -33,6 +33,7 @@ class _SegmentatorStub(nn.Module):
 
 
 def _use_lightweight_model(cfg) -> None:
+    cfg.backend.mixed_precision = False
     cfg.model.base_features = 8
     cfg.model.stages = (1, 1)
     cfg.model.latent_dim = 8

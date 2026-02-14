@@ -57,6 +57,11 @@ class PyTorchBackend(BackendStrategy):
             )
         else:
             self._grad_scaler = None
+        LOGGER.info(
+            "backend=pytorch mixed_precision_effective=%s autocast_dtype=%s",
+            self._amp_enabled,
+            "float16" if self._amp_enabled else "none",
+        )
         self.losses = GrdNetLossComputer(cfg)
 
         self.models = self.build_models()
@@ -70,11 +75,7 @@ class PyTorchBackend(BackendStrategy):
                 return torch.device("cpu")
             try:
                 with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "error",
-                        category=UserWarning,
-                        module=r"torch\.cuda",
-                    )
+                    warnings.filterwarnings("error", category=UserWarning)
                     is_available = torch.cuda.is_available()
             except Warning as exc:
                 raise ConfigurationError(
@@ -93,11 +94,7 @@ class PyTorchBackend(BackendStrategy):
                 )
             try:
                 with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "error",
-                        category=UserWarning,
-                        module=r"torch\.cuda",
-                    )
+                    warnings.filterwarnings("error", category=UserWarning)
                     is_available = torch.cuda.is_available()
             except Warning as exc:
                 raise ConfigurationError(
@@ -387,11 +384,11 @@ class PyTorchBackend(BackendStrategy):
         self.optimizers.discriminator.zero_grad(set_to_none=True)
         self._set_requires_grad(self.models.discriminator, True)
         with self._autocast():
-            _, pred_real = self.models.discriminator(x)
-            _, pred_fake = self.models.discriminator(x_rebuilt_disc)
+            _, pred_real_logits = self.models.discriminator(x)
+            _, pred_fake_logits = self.models.discriminator(x_rebuilt_disc)
             loss_disc, loss_disc_scalar = self.losses.discriminator_total(
-                pred_real,
-                pred_fake,
+                pred_real_logits,
+                pred_fake_logits,
             )
         self._backward_step(loss=loss_disc, optimizer=self.optimizers.discriminator)
         del x_rebuilt_disc
@@ -497,8 +494,8 @@ class PyTorchBackend(BackendStrategy):
                     x_noisy,
                 ) = self._common_forward(x, roi_mask, with_augmentation=False)
 
-                feat_real, pred_real = self.models.discriminator(x)
-                feat_fake, pred_fake = self.models.discriminator(x_rebuilt)
+                feat_real, pred_real_logits = self.models.discriminator(x)
+                feat_fake, pred_fake_logits = self.models.discriminator(x_rebuilt)
                 loss_gen, stats_gen = self.losses.generator_total(
                     x=x,
                     x_rebuilt=x_rebuilt,
@@ -509,8 +506,8 @@ class PyTorchBackend(BackendStrategy):
                     noise_loss=noise_loss,
                 )
                 loss_disc, loss_disc_scalar = self.losses.discriminator_total(
-                    pred_real,
-                    pred_fake,
+                    pred_real_logits,
+                    pred_fake_logits,
                 )
 
                 seg_map: torch.Tensor | None = None

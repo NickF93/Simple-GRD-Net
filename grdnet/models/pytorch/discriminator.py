@@ -38,11 +38,10 @@ class Discriminator(nn.Module):
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(dense_in, 1),
-            nn.Sigmoid(),
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return feature embedding and real/fake probability."""
+        """Return feature embedding and real/fake logits."""
         features = self.encoder(x)
         logits = self.classifier(features)
         return features, logits

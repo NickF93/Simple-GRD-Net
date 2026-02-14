@@ -86,7 +86,8 @@ class GrdNetLossComputer:
         self.l1 = nn.L1Loss(reduction="mean")
         self.l2 = nn.MSELoss(reduction="mean")
         self.ssim = SsimLoss(window_size=11)
-        self.bce = nn.BCELoss(reduction="mean")
+        # AMP-safe discriminator objective (replaces Sigmoid + BCELoss).
+        self.bce_logits = nn.BCEWithLogitsLoss(reduction="mean")
         self.focal = FocalBinaryLoss(
             alpha=cfg.losses.focal_alpha,
             gamma=cfg.losses.focal_gamma,
@@ -136,13 +137,16 @@ class GrdNetLossComputer:
 
     def discriminator_total(
         self,
-        pred_real: torch.Tensor,
-        pred_fake: torch.Tensor,
+        pred_real_logits: torch.Tensor,
+        pred_fake_logits: torch.Tensor,
     ) -> tuple[torch.Tensor, float]:
-        """Binary discrimination loss over real/fake probabilities."""
-        ones = torch.ones_like(pred_real)
-        zeros = torch.zeros_like(pred_fake)
-        loss = 0.5 * (self.bce(pred_real, ones) + self.bce(pred_fake, zeros))
+        """Binary discrimination loss over real/fake logits."""
+        ones = torch.ones_like(pred_real_logits)
+        zeros = torch.zeros_like(pred_fake_logits)
+        loss = 0.5 * (
+            self.bce_logits(pred_real_logits, ones)
+            + self.bce_logits(pred_fake_logits, zeros)
+        )
         return loss, float(loss.detach().cpu().item())
 
     def segmentator_total(

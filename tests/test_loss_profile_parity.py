@@ -77,3 +77,28 @@ def test_deepindustrial_profile_uses_huber_contextual_and_noise_term() -> None:
         + cfg.losses.w4 * noise_loss
     )
     assert torch.isclose(total, expected_total)
+
+
+def test_discriminator_loss_uses_logits_formulation() -> None:
+    cfg = load_experiment_config("configs/profiles/deepindustrial_sn_2026.yaml")
+    loss = GrdNetLossComputer(cfg)
+    assert isinstance(loss.bce_logits, torch.nn.BCEWithLogitsLoss)
+
+    pred_real_logits = torch.tensor([[6.0], [-2.0]], dtype=torch.float32)
+    pred_fake_logits = torch.tensor([[-4.0], [3.0]], dtype=torch.float32)
+
+    total, _ = loss.discriminator_total(
+        pred_real_logits=pred_real_logits,
+        pred_fake_logits=pred_fake_logits,
+    )
+    expected = 0.5 * (
+        functional.binary_cross_entropy_with_logits(
+            pred_real_logits,
+            torch.ones_like(pred_real_logits),
+        )
+        + functional.binary_cross_entropy_with_logits(
+            pred_fake_logits,
+            torch.zeros_like(pred_fake_logits),
+        )
+    )
+    assert torch.isclose(total, expected)

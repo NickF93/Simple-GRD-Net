@@ -6,7 +6,7 @@ profile:
 backend:
   name: "pytorch"
   device: "auto"
-  mixed_precision: false
+  mixed_precision: true
 
 system:
   seed: 1337
@@ -25,8 +25,8 @@ data:
   class_good_name: "good"
   image_size: 256
   channels: 3
-  # Paper-oriented value; reduce to 8/4/2 for lower VRAM.
-  batch_size: 32
+  # Conservative default for 5-6 GB GPUs. Use 32 on larger GPUs for paper-scale runs.
+  batch_size: 4
   num_workers: 4
   patch_size: [256, 256]
   patch_stride: [256, 256]
@@ -43,17 +43,17 @@ augmentation:
 model:
   # Paper-aligned default: 4 stages, 3 residual blocks per stage, final 16x16x1024.
   # Ablation alternative (previous lightweight setting):
-  # base_features: 64
-  # stages: [2, 2, 2, 2]
+  base_features: 64
+  stages: [2, 2, 2, 2]
   # Paper-canonical convention: resample on the last block of each stage.
   # Ablation alternative (non-canonical): "first"
-  # encoder_downsample_position: "first"
-  # decoder_upsample_position: "first"
-  base_features: 128
+  encoder_downsample_position: "first"
+  decoder_upsample_position: "first"
+  #base_features: 128
   latent_dim: 64
-  stages: [3, 3, 3, 3]
-  encoder_downsample_position: "last"
-  decoder_upsample_position: "last"
+  #stages: [3, 3, 3, 3]
+  #encoder_downsample_position: "last"
+  #decoder_upsample_position: "last"
   dense_bottleneck: true
   segmentator_base_features: 64
 

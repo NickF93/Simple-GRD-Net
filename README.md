@@ -37,6 +37,15 @@ $$
 L_{adv} = L_2\big(F_C(X), F_C(\hat{X})\big)
 $$
 
+Discriminator objective (AMP-safe logits form used in code):
+
+$$
+L_{disc} = \frac{1}{2}\left(
+\mathrm{BCEWithLogits}(D(X), 1) +
+\mathrm{BCEWithLogits}(D(\hat{X}), 0)
+\right)
+$$
+
 Contextual loss:
 
 $$
@@ -73,6 +82,7 @@ Default implementation policy for this profile:
 
 - contextual base term uses `L1`
 - noise regularization term `L_{nse}` is disabled
+- discriminator branch uses `BCEWithLogitsLoss` (equivalent to sigmoid + BCE, but AMP-safe)
 
 ### 1.2 DeepIndustrial-SN 2026 profile (`deepindustrial_sn_2026`)
 
@@ -114,6 +124,7 @@ Default implementation policy for this profile:
 
 - contextual base term uses `Huber`
 - noise regularization term `L_{nse}` is enabled
+- discriminator branch uses `BCEWithLogitsLoss` on logits
 
 ## 2. Architecture
 
@@ -147,7 +158,7 @@ flowchart LR
     XR --> D
     D --> FR[Feature on X]
     D --> FF[Feature on X hat]
-    D --> PR[Real fake probability]
+    D --> PR[Real fake logit]
 
     X --> LC[Context loss L con]
     XR --> LC
@@ -260,8 +271,11 @@ Provided configs:
 - `configs/profiles/grdnet_2023_full.yaml`
 - `configs/profiles/deepindustrial_sn_2026.yaml`
 
-DeepIndustrial-SN profile defaults are paper-aligned (`base_features: 128`, `stages: [3,3,3,3]`) and
-include commented lighter alternatives for ablation studies.
+DeepIndustrial-SN profile defaults keep the paper-aligned architecture
+(`base_features: 128`, `stages: [3,3,3,3]`) while using a conservative
+`data.batch_size: 4` default for commodity 5-6 GB GPUs and enabling
+`backend.mixed_precision: true` on CUDA. For paper-scale runs on larger GPUs,
+set `data.batch_size: 32`.
 
 Stage-resampling policy is now explicit and configurable:
 
@@ -341,7 +355,8 @@ python main.py infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoin
 Troubleshooting:
 
 - `backend.device: "auto"` probes CUDA. If CUDA initialization fails, the backend now reports a deterministic error message and falls back to CPU.
-- If training is OOM, lower `data.batch_size` (for example `32 -> 8 -> 4 -> 2`).
+- On 5-6 GB GPUs, start with `backend.mixed_precision: true` and `data.batch_size: 4`.
+- If training is OOM or cuBLAS init fails, lower `data.batch_size` (for example `4 -> 2 -> 1`) and set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`.
 
 ## 7. Output Artifacts
 

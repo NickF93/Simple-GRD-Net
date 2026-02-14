@@ -31,6 +31,7 @@ def _lightweight_runtime_cfg():
     cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
     cfg.backend.name = "pytorch"
     cfg.backend.device = "cpu"
+    cfg.backend.mixed_precision = False
     cfg.data.image_size = 32
     cfg.data.patch_size = (32, 32)
     cfg.data.patch_stride = (32, 32)
