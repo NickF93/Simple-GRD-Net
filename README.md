@@ -275,6 +275,11 @@ Backend stubs:
 
 ## 5. Installation
 
+Runtime minimums:
+
+- Python `>= 3.11`
+- Torch `>= 2.7.0`
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -314,7 +319,7 @@ Infer:
 grdnet infer -c configs/profiles/deepindustrial_sn_2026.yaml --checkpoint artifacts/checkpoints/deepindustrial_sn_2026/epoch_0010.pt
 ```
 
-### 6.1 DeepIndustrial-SN Training + Benchmark TODO Checklist
+### 6.1 DeepIndustrial-SN Training + Benchmark Command Checklist
 
 Run from repository root:
 

@@ -189,18 +189,22 @@ def test_train_step_uses_two_generator_passes_and_phase_train_modes(
 
 def test_resolve_device_auto_branch(monkeypatch) -> None:
     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
-    assert str(create_backend(_lightweight_train_cfg()).device) == "cpu"
+    cfg = _lightweight_train_cfg()
+    cfg.backend.device = "auto"
+    assert str(create_backend(cfg).device) == "cpu"
 
 
-def test_resolve_device_auto_falls_back_on_cuda_warning(monkeypatch) -> None:
+def test_resolve_device_auto_raises_on_cuda_probe_warning(monkeypatch) -> None:
     monkeypatch.setattr("torch.backends.cuda.is_built", lambda: True)
 
     def _warn_then_false() -> bool:
-        warnings.warn("cuda probe failed", UserWarning, stacklevel=1)
-        return False
+        raise UserWarning("cuda probe failed")
 
     monkeypatch.setattr("torch.cuda.is_available", _warn_then_false)
-    assert str(create_backend(_lightweight_train_cfg()).device) == "cpu"
+    cfg = _lightweight_train_cfg()
+    cfg.backend.device = "auto"
+    with pytest.raises(ConfigurationError, match="auto'.*initialization failed"):
+        _ = create_backend(cfg)
 
 
 def test_resolve_device_cuda_raises_on_probe_warning(monkeypatch) -> None:

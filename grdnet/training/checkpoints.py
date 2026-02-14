@@ -84,14 +84,11 @@ def load_checkpoint(backend: BackendStrategy, path: Path) -> int:
         raise CheckpointError(f"Checkpoint path is not a file: {path}")
 
     try:
-        try:
-            raw_payload = torch.load(
-                path,
-                map_location=backend.device,
-                weights_only=True,
-            )
-        except TypeError:
-            raw_payload = torch.load(path, map_location=backend.device)
+        raw_payload = torch.load(
+            path,
+            map_location=backend.device,
+            weights_only=True,
+        )
     except Exception as exc:
         raise CheckpointError(f"Unable to read checkpoint {path}: {exc}") from exc
 

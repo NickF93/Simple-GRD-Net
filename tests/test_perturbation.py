@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from grdnet.config.schema import AugmentationConfig
@@ -50,3 +51,11 @@ def test_gaussian_noise_noop_when_sigma_zero() -> None:
     images = torch.rand((2, 1, 8, 8), dtype=torch.float32)
     out = apply_gaussian_noise(images, sigma_max=0.0)
     assert torch.allclose(out, images)
+
+
+def test_perlin_perturbation_rejects_min_area_above_patch_area() -> None:
+    cfg = _aug_cfg(perlin_min_area=65)
+    images = torch.zeros((1, 1, 8, 8), dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="perlin_min_area exceeds patch area"):
+        _ = apply_perlin_perturbation(images, cfg)

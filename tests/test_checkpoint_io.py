@@ -96,24 +96,24 @@ def test_checkpoint_load_prefers_weights_only(tmp_path: Path, monkeypatch) -> No
     assert recorded.get("weights_only") is True
 
 
-def test_checkpoint_load_fallback_without_weights_only(
+def test_checkpoint_load_rejects_weights_only_incompatible_runtime(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    checkpoint_path = tmp_path / "fallback.pt"
+    checkpoint_path = tmp_path / "incompatible_weights_only.pt"
     backend_write = _BackendStub(with_segmentator=False)
     save_checkpoint(backend_write, checkpoint_path, epoch=4)
     original_torch_load = torch.load
 
-    def _compat_load(*args, **kwargs):
+    def _incompatible_load(*args, **kwargs):
         if "weights_only" in kwargs:
             raise TypeError("weights_only unsupported")
         return original_torch_load(*args, **kwargs)
 
-    monkeypatch.setattr("grdnet.training.checkpoints.torch.load", _compat_load)
+    monkeypatch.setattr("grdnet.training.checkpoints.torch.load", _incompatible_load)
     backend_read = _BackendStub(with_segmentator=False)
-    epoch = load_checkpoint(backend_read, checkpoint_path)
-    assert epoch == 4
+    with pytest.raises(CheckpointError, match="Unable to read checkpoint"):
+        _ = load_checkpoint(backend_read, checkpoint_path)
 
 
 def test_checkpoint_not_found_raises(tmp_path: Path) -> None:

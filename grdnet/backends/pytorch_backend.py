@@ -77,12 +77,11 @@ class PyTorchBackend(BackendStrategy):
                     )
                     is_available = torch.cuda.is_available()
             except Warning as exc:
-                LOGGER.error(
-                    "CUDA auto-probe failed; falling back to CPU. "
-                    "Fix CUDA driver/runtime for GPU execution. detail=%s",
-                    exc,
-                )
-                return torch.device("cpu")
+                raise ConfigurationError(
+                    "backend.device='auto' detected CUDA build, but CUDA "
+                    f"initialization failed: {exc}. "
+                    "Fix CUDA driver/runtime or set backend.device='cpu'."
+                ) from exc
             return torch.device("cuda" if is_available else "cpu")
 
         device = torch.device(raw)

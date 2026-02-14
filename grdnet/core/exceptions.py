@@ -19,3 +19,7 @@ class DatasetContractError(GrdNetError):
 
 class CheckpointError(GrdNetError):
     """Raised when checkpoint save/load contract validation fails."""
+
+
+class RuntimeCompatibilityError(GrdNetError):
+    """Raised when Python/Torch runtime versions are below project minimums."""

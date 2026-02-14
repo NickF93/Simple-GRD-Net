@@ -46,7 +46,7 @@ model:
   # base_features: 64
   # stages: [2, 2, 2, 2]
   # Paper-canonical convention: resample on the last block of each stage.
-  # Ablation alternative (legacy implementation): "first"
+  # Ablation alternative (non-canonical): "first"
   # encoder_downsample_position: "first"
   # decoder_upsample_position: "first"
   base_features: 128

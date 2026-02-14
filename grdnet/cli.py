@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from grdnet.core.runtime import enforce_runtime_versions
 from grdnet.pipeline.runner import (
     run_calibrate,
     run_evaluate,
@@ -54,6 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments and dispatch the selected command."""
+    enforce_runtime_versions()
     parser = _build_parser()
     args = parser.parse_args(argv)
 

@@ -1,4 +1,4 @@
-"""Legacy entrypoint forwarding to the new CLI."""
+"""CLI entrypoint forwarding to package command dispatcher."""
 
 from grdnet.cli import main
 

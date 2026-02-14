@@ -89,10 +89,9 @@ def _sample_masked_noise(
             noise = (noise - noise.min()) / (noise.max() - noise.min() + 1e-8)
             return noise, mask
 
-    # Guaranteed fallback for fail-fast deterministic behavior.
-    fallback_noise = torch.zeros((channels, height, width), device=device)
-    fallback_mask = torch.zeros((1, height, width), device=device)
-    return fallback_noise, fallback_mask
+    raise RuntimeError(
+        "Unable to generate Perlin mask satisfying min_area after 8 attempts."
+    )
 
 
 def apply_geometry_augmentation(
@@ -146,6 +145,11 @@ def apply_perlin_perturbation(
     """
     bsz, channels, height, width = images.shape
     device = images.device
+    if cfg.perlin_min_area > height * width:
+        raise ValueError(
+            "augmentation.perlin_min_area exceeds patch area; "
+            "reduce perlin_min_area or increase patch size."
+        )
 
     noise_batch = torch.zeros_like(images)
     mask_batch = torch.zeros((bsz, 1, height, width), device=device)
