@@ -121,6 +121,7 @@ def _setup_from_cfg(
     cfg: ExperimentConfig,
     *,
     config_path: str,
+    config_source: str = "scoped",
 ) -> tuple[ExperimentConfig, BackendStrategy, DataModule, list[Reporter]]:
     configure_logging(cfg.system.log_level)
     profile = getattr(cfg, "profile", None)
@@ -133,7 +134,10 @@ def _setup_from_cfg(
     seed = getattr(system_cfg, "seed", "<unknown>")
     deterministic = getattr(system_cfg, "deterministic", "<unknown>")
 
-    LOGGER.info("config_loaded path=%s", config_path)
+    if config_source == "file":
+        LOGGER.info("config_loaded path=%s", config_path)
+    else:
+        LOGGER.info("config_reused source=%s path=%s", config_source, config_path)
     LOGGER.info(
         "profile_selected name=%s mode=%s backend=%s",
         profile_name,
@@ -166,7 +170,7 @@ def _setup(
     config_path: str,
 ) -> tuple[ExperimentConfig, BackendStrategy, DataModule, list[Reporter]]:
     cfg = load_experiment_config(config_path)
-    return _setup_from_cfg(cfg, config_path=config_path)
+    return _setup_from_cfg(cfg, config_path=config_path, config_source="file")
 
 
 def _maybe_load_checkpoint(
@@ -250,6 +254,7 @@ def run_train(config_path: str) -> int:
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
+                config_source=f"benchmark_category:{category}",
             )
             LOGGER.info("building_train_loader")
             train_loader = datamodule.train_loader()
@@ -306,6 +311,7 @@ def run_calibrate(config_path: str, checkpoint: str | None) -> int:
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
+                config_source=f"benchmark_category:{category}",
             )
             category_checkpoint = _resolve_category_checkpoint(
                 checkpoint,
@@ -377,6 +383,7 @@ def run_evaluate(config_path: str, checkpoint: str | None) -> int:
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
+                config_source=f"benchmark_category:{category}",
             )
             category_checkpoint = _resolve_category_checkpoint(
                 checkpoint,
@@ -465,6 +472,7 @@ def run_infer(config_path: str, checkpoint: str | None) -> int:
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
+                config_source=f"benchmark_category:{category}",
             )
             category_checkpoint = _resolve_category_checkpoint(
                 checkpoint,

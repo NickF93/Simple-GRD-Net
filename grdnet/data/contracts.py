@@ -31,5 +31,6 @@ class DatasetAdapter(Protocol):
         nominal_only: bool,
         roi_root: Path | None,
         mask_root: Path | None,
+        mask_enabled: bool = True,
     ) -> Dataset:
         """Build a dataset for a filesystem split."""

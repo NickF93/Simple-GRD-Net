@@ -42,6 +42,7 @@ class MvtecLikeDataset(Dataset):
         data_cfg: DataConfig,
         roi_root: Path | None,
         mask_root: Path | None,
+        mask_enabled: bool,
     ) -> None:
         if not samples:
             raise DatasetContractError("Dataset is empty after indexing.")
@@ -49,6 +50,7 @@ class MvtecLikeDataset(Dataset):
         self._cfg = data_cfg
         self._roi_root = roi_root
         self._mask_root = mask_root
+        self._mask_enabled = mask_enabled
         self._logged_missing_roi_root = False
         self._logged_missing_roi_sample = False
         self._logged_missing_mask_root = False
@@ -139,6 +141,12 @@ class MvtecLikeDataset(Dataset):
         return self._load_binary_mask(roi_path)
 
     def _load_gt_mask(self, sample: _IndexedSample) -> torch.Tensor:
+        if not self._mask_enabled:
+            return torch.zeros(
+                (1, self._cfg.image_size, self._cfg.image_size),
+                dtype=torch.float32,
+            )
+
         if self._mask_root is None:
             if not self._logged_missing_mask_root:
                 LOGGER.warning(
@@ -152,6 +160,11 @@ class MvtecLikeDataset(Dataset):
 
         gt_mask_path = self._resolve_gt_mask_path(sample)
         if gt_mask_path is None:
+            if sample.class_name == self._cfg.class_good_name:
+                return torch.zeros(
+                    (1, self._cfg.image_size, self._cfg.image_size),
+                    dtype=torch.float32,
+                )
             if not self._logged_missing_gt_mask:
                 LOGGER.warning(
                     "gt_mask_not_found sample=%s fallback=zero_mask_treat_as_good",
@@ -222,6 +235,7 @@ class MvtecLikeAdapter:
         nominal_only: bool,
         roi_root: Path | None,
         mask_root: Path | None,
+        mask_enabled: bool = True,
     ) -> Dataset:
         """Index one split root and build a dataset instance."""
         samples = self._index(root=root, nominal_only=nominal_only)
@@ -230,4 +244,5 @@ class MvtecLikeAdapter:
             data_cfg=self._cfg,
             roi_root=roi_root,
             mask_root=mask_root,
+            mask_enabled=mask_enabled,
         )

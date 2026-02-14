@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from grdnet.config.schema import DataConfig
@@ -39,6 +40,29 @@ def test_good_sample_allows_missing_mask_and_defaults_to_zeros(tmp_path: Path) -
     sample = dataset[0]
     assert int(sample["label"]) == 0
     assert float(sample["gt_mask"].sum().item()) == 0.0
+
+
+def test_good_sample_missing_mask_does_not_warn(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    test_root = tmp_path / "test"
+    mask_root = tmp_path / "ground_truth"
+    _write_png(test_root / "good" / "000.png", np.zeros((32, 32), dtype=np.uint8))
+
+    adapter = MvtecLikeAdapter(_data_cfg(tmp_path))
+    dataset = adapter.build_dataset(
+        root=test_root,
+        nominal_only=False,
+        roi_root=None,
+        mask_root=mask_root,
+    )
+    with caplog.at_level("WARNING"):
+        sample = dataset[0]
+
+    assert int(sample["label"]) == 0
+    assert float(sample["gt_mask"].sum().item()) == 0.0
+    assert not any("gt_mask_not_found" in rec.message for rec in caplog.records)
 
 
 def test_anomalous_sample_missing_mask_defaults_to_good(tmp_path: Path) -> None:

@@ -232,3 +232,29 @@ def test_missing_roi_path_logs_warning_and_falls_back_to_ones(
         "roi_dir_not_found" in rec.message or "roi_root_not_found" in rec.message
         for rec in caplog.records
     )
+
+
+def test_train_loader_does_not_warn_when_masks_are_disabled(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    train_good_dir = tmp_path / "train" / "good"
+    train_good_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("L", (32, 32), color=0).save(train_good_dir / "000.png")
+
+    cfg = DataConfig(
+        train_dir=tmp_path / "train",
+        image_size=32,
+        channels=1,
+        batch_size=1,
+        num_workers=0,
+        patch_size=(32, 32),
+        patch_stride=(32, 32),
+    )
+
+    datamodule = DataModule(cfg)
+    with caplog.at_level("WARNING"):
+        loader = datamodule.train_loader()
+        _ = next(iter(loader))
+
+    assert not any("mask_root_not_set" in rec.message for rec in caplog.records)

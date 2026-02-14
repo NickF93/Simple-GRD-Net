@@ -85,6 +85,7 @@ class DataModule:
                 nominal_only=nominal_only,
                 roi_root=roi_root,
                 mask_root=effective_mask_root,
+                mask_enabled=use_mask,
             )
 
         categories = self._mvtec_benchmark_categories(root)
@@ -109,6 +110,7 @@ class DataModule:
                         nominal_only=nominal_only,
                         roi_root=roi_root,
                         mask_root=effective_mask_root,
+                        mask_enabled=use_mask,
                     )
                 )
             if not datasets:
@@ -124,6 +126,7 @@ class DataModule:
             nominal_only=nominal_only,
             roi_root=roi_root,
             mask_root=mask_root,
+            mask_enabled=use_mask,
         )
 
     def _loader(self, dataset: Dataset, shuffle: bool) -> DataLoader:
