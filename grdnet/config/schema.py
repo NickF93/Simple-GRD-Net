@@ -178,6 +178,18 @@ class InferenceConfig(BaseModel):
     ] = "profile_default"
 
 
+class TrainBatchPreviewConfig(BaseModel):
+    """Training preview artifact controls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    every_n_epochs: int = Field(default=1, ge=1)
+    step_index: int = Field(default=1, ge=1)
+    max_images: int = Field(default=8, ge=1)
+    subdir: str = Field(default="train_batch_previews", min_length=1)
+
+
 class ReportingConfig(BaseModel):
     """Reporting and artifact configuration."""
 
@@ -185,6 +197,9 @@ class ReportingConfig(BaseModel):
 
     csv_metrics_filename: str = "metrics.csv"
     csv_predictions_filename: str = "predictions.csv"
+    train_batch_preview: TrainBatchPreviewConfig = Field(
+        default_factory=TrainBatchPreviewConfig
+    )
 
 
 class SystemConfig(BaseModel):

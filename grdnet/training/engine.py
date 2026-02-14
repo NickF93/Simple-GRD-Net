@@ -10,9 +10,10 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from grdnet.backends.base import BackendStrategy
+from grdnet.backends.base import BackendStrategy, StepOutput
 from grdnet.config.schema import ExperimentConfig
 from grdnet.reporting.base import Reporter
+from grdnet.reporting.train_batch_preview import TrainBatchPreviewWriter
 from grdnet.training.checkpoints import save_checkpoint
 
 LOGGER = logging.getLogger(__name__)
@@ -42,6 +43,14 @@ class TrainingEngine:
         self.cfg = cfg
         self.backend = backend
         self.reporters = reporters
+        preview_cfg = self.cfg.reporting.train_batch_preview
+        self._preview_writer: TrainBatchPreviewWriter | None = None
+        if preview_cfg.enabled:
+            self._preview_writer = TrainBatchPreviewWriter(
+                output_dir=self.cfg.training.output_dir,
+                subdir=preview_cfg.subdir,
+                max_images=preview_cfg.max_images,
+            )
 
     @staticmethod
     def _average(values: list[dict[str, float]]) -> dict[str, float]:
@@ -138,6 +147,12 @@ class TrainingEngine:
                     output = self.backend.train_step(batch)
                 else:
                     output = self.backend.eval_step(batch)
+                self._maybe_write_train_batch_preview(
+                    output=output,
+                    train=train,
+                    epoch=epoch,
+                    step_idx=step_idx,
+                )
 
                 invalid_keys = [
                     key
@@ -175,6 +190,58 @@ class TrainingEngine:
                     progress.set_postfix(postfix)
 
         return self._average(all_stats)
+
+    def _should_capture_train_preview(
+        self,
+        *,
+        train: bool,
+        epoch: int,
+        step_idx: int,
+    ) -> bool:
+        preview_cfg = self.cfg.reporting.train_batch_preview
+        if not train or not preview_cfg.enabled or self._preview_writer is None:
+            return False
+        if epoch < 1 or step_idx < 1:
+            return False
+        if step_idx != preview_cfg.step_index:
+            return False
+        return ((epoch - 1) % preview_cfg.every_n_epochs) == 0
+
+    def _maybe_write_train_batch_preview(
+        self,
+        *,
+        output: StepOutput,
+        train: bool,
+        epoch: int,
+        step_idx: int,
+    ) -> None:
+        if not self._should_capture_train_preview(
+            train=train,
+            epoch=epoch,
+            step_idx=step_idx,
+        ):
+            return
+        if output.train_batch_preview is None:
+            LOGGER.warning(
+                "train_batch_preview_missing epoch=%d step=%d "
+                "reason=backend_payload_absent",
+                epoch,
+                step_idx,
+            )
+            return
+        if self._preview_writer is None:
+            return
+        path = self._preview_writer.write(
+            epoch=epoch,
+            step=step_idx,
+            preview=output.train_batch_preview,
+        )
+        LOGGER.info(
+            "train_batch_preview_saved epoch=%d step=%d path=%s",
+            epoch,
+            step_idx,
+            path,
+        )
 
     def _step_schedulers(self) -> None:
         self._maybe_step_scheduler(

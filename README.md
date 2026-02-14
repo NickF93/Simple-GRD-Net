@@ -484,7 +484,20 @@ Artifacts are written under `training.output_dir` and `training.checkpoint_dir` 
 
 - `metrics.csv`: epoch and evaluation metrics.
 - `predictions.csv`: patch-wise scores/predictions plus image-level aggregation fields (`image_prediction`, `anomalous_patch_ratio`).
+- `train_batch_previews/epoch_XXXX_step_YYYY.png`: 4-row train preview composite (`X`, `X*`, Perlin mask `M`, `X_hat`) captured from configured train steps.
 - `epoch_XXXX.pt`: full training checkpoints.
+
+Train preview controls are configurable from YAML:
+
+```yaml
+reporting:
+  train_batch_preview:
+    enabled: true
+    every_n_epochs: 1
+    step_index: 1
+    max_images: 8
+    subdir: "train_batch_previews"
+```
 
 Evaluation output metrics include:
 

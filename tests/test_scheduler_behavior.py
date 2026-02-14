@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 import torch
 
-from grdnet.backends.base import OptimizerBundle, SchedulerBundle, StepOutput
+from grdnet.backends.base import (
+    OptimizerBundle,
+    SchedulerBundle,
+    StepOutput,
+    TrainBatchPreview,
+)
 from grdnet.config.loader import load_experiment_config
 from grdnet.training.engine import TrainingEngine
 from grdnet.training.schedulers import GammaCosineAnnealingWarmRestarts
@@ -95,6 +100,7 @@ def _engine_with_step_unit(
     cfg.training.log_interval = 1000
     cfg.training.checkpoint_dir = Path("/tmp/grdnet_test_checkpoints")
     cfg.training.output_dir = Path("/tmp/grdnet_test_reports")
+    cfg.reporting.train_batch_preview.enabled = False
 
     backend = _BackendStub()
     monkeypatch.setattr(
@@ -163,6 +169,7 @@ def test_training_engine_skips_scheduler_when_optimizer_not_stepped(
     cfg.training.log_interval = 1000
     cfg.training.checkpoint_dir = Path("/tmp/grdnet_test_checkpoints")
     cfg.training.output_dir = Path("/tmp/grdnet_test_reports")
+    cfg.reporting.train_batch_preview.enabled = False
 
     parameter = torch.nn.Parameter(torch.tensor([1.0]))
     optimizer = torch.optim.SGD([parameter], lr=1.0)
@@ -219,3 +226,89 @@ def test_training_engine_skips_scheduler_when_optimizer_not_stepped(
 
     # LRScheduler initializes with last_epoch=0 in current torch.
     assert scheduler.last_epoch == 0
+
+
+def test_training_engine_writes_train_preview_on_first_step(monkeypatch) -> None:
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.scheduler.step_unit = "epoch"
+    cfg.training.epochs = 2
+    cfg.training.log_interval = 1000
+    cfg.training.checkpoint_dir = Path("/tmp/grdnet_test_checkpoints")
+    cfg.training.output_dir = Path("/tmp/grdnet_test_reports")
+    cfg.reporting.train_batch_preview.enabled = True
+    cfg.reporting.train_batch_preview.every_n_epochs = 1
+    cfg.reporting.train_batch_preview.step_index = 1
+
+    class _BackendWithPreview:
+        def __init__(self) -> None:
+            scheduler = _CountingScheduler()
+            self.optimizers = OptimizerBundle(
+                generator=_OptimizerStub(),  # type: ignore[arg-type]
+                discriminator=_OptimizerStub(),  # type: ignore[arg-type]
+                segmentator=None,
+            )
+            self.schedulers = SchedulerBundle(
+                generator=scheduler,
+                discriminator=scheduler,
+                segmentator=None,
+            )
+
+        def train_step(self, batch: dict[str, int]) -> StepOutput:
+            _ = batch
+            preview = TrainBatchPreview(
+                x=torch.zeros((2, 1, 8, 8)),
+                x_noisy=torch.zeros((2, 1, 8, 8)),
+                noise_mask=torch.zeros((2, 1, 8, 8)),
+                x_rebuilt=torch.zeros((2, 1, 8, 8)),
+            )
+            return StepOutput(
+                stats={"loss": 1.0},
+                x_rebuilt=torch.zeros((1, 1, 1, 1)),
+                patch_scores=torch.zeros((1,)),
+                heatmap=torch.zeros((1, 1, 1, 1)),
+                seg_map=None,
+                train_batch_preview=preview,
+            )
+
+        def eval_step(self, batch: dict[str, int]) -> StepOutput:
+            _ = batch
+            return StepOutput(
+                stats={"loss": 1.0},
+                x_rebuilt=torch.zeros((1, 1, 1, 1)),
+                patch_scores=torch.zeros((1,)),
+                heatmap=torch.zeros((1, 1, 1, 1)),
+                seg_map=None,
+            )
+
+    class _PreviewWriterStub:
+        def __init__(self, **_kwargs) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def write(self, *, epoch: int, step: int, preview: TrainBatchPreview) -> Path:
+            _ = preview
+            self.calls.append((epoch, step))
+            return Path(f"/tmp/epoch_{epoch:04d}_step_{step:04d}.png")
+
+    writer_instances: list[_PreviewWriterStub] = []
+
+    def _writer_factory(**kwargs) -> _PreviewWriterStub:
+        _ = kwargs
+        writer = _PreviewWriterStub()
+        writer_instances.append(writer)
+        return writer
+
+    monkeypatch.setattr(
+        "grdnet.training.engine.TrainBatchPreviewWriter",
+        _writer_factory,
+    )
+    monkeypatch.setattr(
+        "grdnet.training.engine.save_checkpoint",
+        lambda *args, **kwargs: None,
+    )
+
+    engine = TrainingEngine(cfg=cfg, backend=_BackendWithPreview(), reporters=[])
+    train_loader = [{"x": 1}, {"x": 2}]
+    engine.train(train_loader, None)
+
+    assert len(writer_instances) == 1
+    assert writer_instances[0].calls == [(1, 1), (2, 1)]

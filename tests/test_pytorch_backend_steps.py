@@ -117,6 +117,21 @@ def test_train_and_eval_step_without_segmentator_branch() -> None:
     assert eval_output.stats["loss.segmentator"] == 0.0
 
 
+def test_train_step_emits_preview_payload_when_enabled() -> None:
+    cfg = _lightweight_runtime_cfg()
+    cfg.reporting.train_batch_preview.enabled = True
+    backend = create_backend(cfg)
+    _disable_backward_step(backend)
+
+    output = backend.train_step(_batch(channels=backend.cfg.data.channels))
+    assert output.train_batch_preview is not None
+    preview = output.train_batch_preview
+    assert preview.x.shape == preview.x_noisy.shape
+    assert preview.x.shape == preview.x_rebuilt.shape
+    assert preview.noise_mask.shape[0] == preview.x.shape[0]
+    assert preview.noise_mask.shape[2:] == preview.x.shape[2:]
+
+
 def test_train_step_uses_two_generator_passes_and_phase_train_modes(
     monkeypatch,
 ) -> None:
