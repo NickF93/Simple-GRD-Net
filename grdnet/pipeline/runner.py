@@ -43,12 +43,21 @@ def _mvtec_benchmark_categories(root: Path | None) -> list[str]:
 
 
 def _scope_path_to_category(path: Path | None, category: str) -> Path | None:
+    """Scope a split root to one category when `path` is an MVTec benchmark root."""
     if path is None:
         return None
     categories = _mvtec_benchmark_categories(path)
     if category in categories:
         return path / category
     return path
+
+
+def _scope_required_path_to_category(path: Path, category: str) -> Path:
+    """Scope a required path field and fail fast if it unexpectedly becomes null."""
+    scoped = _scope_path_to_category(path, category)
+    if scoped is None:
+        raise ValueError("Required path unexpectedly resolved to None.")
+    return scoped
 
 
 def _is_mvtec_split_dir(path: Path) -> bool:
@@ -103,7 +112,10 @@ def _log_benchmark_category_paths(
 def _scoped_category_cfg(cfg: ExperimentConfig, category: str) -> ExperimentConfig:
     scoped = cfg.model_copy(deep=True)
     scoped.profile.name = f"{cfg.profile.name} [{category}]"
-    scoped.data.train_dir = _scope_path_to_category(scoped.data.train_dir, category)
+    scoped.data.train_dir = _scope_required_path_to_category(
+        scoped.data.train_dir,
+        category,
+    )
     scoped.data.val_dir = _scope_path_to_category(scoped.data.val_dir, category)
     scoped.data.test_dir = _scope_path_to_category(scoped.data.test_dir, category)
     scoped.data.calibration_dir = _scope_path_to_category(

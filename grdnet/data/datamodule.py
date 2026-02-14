@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sized
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +12,7 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 from grdnet.config.schema import DataConfig
 from grdnet.core.exceptions import DatasetContractError
 from grdnet.data.adapters.mvtec import MvtecLikeAdapter
+from grdnet.data.contracts import SampleBatchItem
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class DataModule:
         inferred_mask_root: Path | None,
         missing_message: str,
     ) -> Path | None:
+        """Resolve explicit/inferred GT mask root or fail fast when required."""
         if not use_mask:
             return None
         effective = (
@@ -79,7 +82,7 @@ class DataModule:
         use_roi: bool,
         use_mask: bool,
         split_kind: Literal["train", "val", "test", "calibration"],
-    ) -> Dataset:
+    ) -> Dataset[SampleBatchItem]:
         roi_root = self._cfg.roi_dir if use_roi else None
         mask_root = self._cfg.mask_dir if use_mask else None
 
@@ -110,7 +113,7 @@ class DataModule:
 
         categories = self._mvtec_benchmark_categories(root)
         if categories:
-            datasets: list[Dataset] = []
+            datasets: list[Dataset[SampleBatchItem]] = []
             split_subdir = self._split_subdir(split_kind)
             for category_root in categories:
                 split_root = category_root / split_subdir
@@ -150,7 +153,11 @@ class DataModule:
             mask_enabled=use_mask,
         )
 
-    def _loader(self, dataset: Dataset, shuffle: bool) -> DataLoader:
+    def _loader(
+        self,
+        dataset: Dataset[SampleBatchItem],
+        shuffle: bool,
+    ) -> DataLoader[SampleBatchItem]:
         return DataLoader(
             dataset,
             batch_size=self._cfg.batch_size,
@@ -161,7 +168,7 @@ class DataModule:
             drop_last=False,
         )
 
-    def train_loader(self) -> DataLoader:
+    def train_loader(self) -> DataLoader[SampleBatchItem]:
         """Build the training dataloader."""
         dataset = self._build_dataset(
             root=self._cfg.train_dir,
@@ -172,7 +179,7 @@ class DataModule:
         )
         return self._loader(dataset, shuffle=True)
 
-    def val_loader(self) -> DataLoader | None:
+    def val_loader(self) -> DataLoader[SampleBatchItem] | None:
         """Build validation loader or derive a split from training data."""
         if self._cfg.val_dir is not None:
             dataset = self._build_dataset(
@@ -191,12 +198,15 @@ class DataModule:
             use_mask=False,
             split_kind="train",
         )
-        train_size = int(0.95 * len(dataset))
-        val_size = len(dataset) - train_size
+        if not isinstance(dataset, Sized):
+            raise DatasetContractError("Training dataset must implement __len__().")
+        dataset_len = len(dataset)
+        train_size = int(0.95 * dataset_len)
+        val_size = dataset_len - train_size
         _, val_subset = random_split(dataset, [train_size, val_size])
         return self._loader(val_subset, shuffle=False)
 
-    def test_loader(self) -> DataLoader | None:
+    def test_loader(self) -> DataLoader[SampleBatchItem] | None:
         """Build test/evaluation dataloader when configured."""
         if self._cfg.test_dir is None:
             return None
@@ -209,7 +219,7 @@ class DataModule:
         )
         return self._loader(dataset, shuffle=False)
 
-    def calibration_loader(self) -> DataLoader | None:
+    def calibration_loader(self) -> DataLoader[SampleBatchItem] | None:
         """Build calibration dataloader when configured."""
         if self._cfg.calibration_dir is None:
             return None

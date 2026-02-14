@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 import torch
 from torch.utils.data import Dataset
+
+SampleValue: TypeAlias = torch.Tensor | int | str
+SampleBatchItem: TypeAlias = dict[str, SampleValue]
 
 
 @dataclass(frozen=True)
@@ -32,5 +35,5 @@ class DatasetAdapter(Protocol):
         roi_root: Path | None,
         mask_root: Path | None,
         mask_enabled: bool = True,
-    ) -> Dataset:
+    ) -> Dataset[SampleBatchItem]:
         """Build a dataset for a filesystem split."""

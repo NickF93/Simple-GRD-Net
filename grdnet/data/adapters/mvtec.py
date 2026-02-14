@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 
 from grdnet.config.schema import DataConfig
 from grdnet.core.exceptions import DatasetContractError
+from grdnet.data.contracts import SampleBatchItem
 
 _ALLOWED_EXTENSIONS: tuple[str, ...] = (
     ".png",
@@ -32,7 +33,7 @@ class _IndexedSample:
     class_relative_path: Path
 
 
-class MvtecLikeDataset(Dataset):
+class MvtecLikeDataset(Dataset[SampleBatchItem]):
     """Dataset implementation for MVTec-like folder layouts."""
 
     def __init__(
@@ -65,12 +66,15 @@ class MvtecLikeDataset(Dataset):
         return len(self._samples)
 
     def _zero_mask(self) -> torch.Tensor:
+        """Return a writable zero-mask tensor copy for one sample."""
         return self._zero_mask_template.clone()
 
     def _full_roi_mask(self) -> torch.Tensor:
+        """Return a writable full-ROI tensor copy for one sample."""
         return self._full_roi_mask_template.clone()
 
     def _warn_once(self, event: str, message: str, *args: object) -> None:
+        """Emit one structured warning per event key for this dataset instance."""
         if event in self._warned_events:
             return
         LOGGER.warning(message, *args)
@@ -176,7 +180,7 @@ class MvtecLikeDataset(Dataset):
 
         return self._load_binary_mask(gt_mask_path)
 
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor | int | str]:
+    def __getitem__(self, index: int) -> SampleBatchItem:
         sample = self._samples[index]
         image = self._load_image(sample.image_path)
         roi_mask = self._load_roi_mask(sample)
@@ -234,7 +238,7 @@ class MvtecLikeAdapter:
         roi_root: Path | None,
         mask_root: Path | None,
         mask_enabled: bool = True,
-    ) -> Dataset:
+    ) -> Dataset[SampleBatchItem]:
         """Index one split root and build a dataset instance."""
         samples = self._index(root=root, nominal_only=nominal_only)
         return MvtecLikeDataset(
