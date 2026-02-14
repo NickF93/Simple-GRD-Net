@@ -49,6 +49,10 @@ class MvtecLikeDataset(Dataset):
         self._cfg = data_cfg
         self._roi_root = roi_root
         self._mask_root = mask_root
+        self._logged_missing_roi_root = False
+        self._logged_missing_roi_sample = False
+        self._logged_missing_mask_root = False
+        self._logged_missing_gt_mask = False
 
     def __len__(self) -> int:
         return len(self._samples)
@@ -83,6 +87,14 @@ class MvtecLikeDataset(Dataset):
     def _resolve_roi_mask_path(self, sample: _IndexedSample) -> Path | None:
         if self._roi_root is None:
             return None
+        if not self._roi_root.exists():
+            if not self._logged_missing_roi_root:
+                LOGGER.warning(
+                    "roi_root_not_found path=%s fallback=full_image_roi",
+                    self._roi_root,
+                )
+                self._logged_missing_roi_root = True
+            return None
 
         base = self._roi_root / sample.class_name / sample.class_relative_path
         candidates = (
@@ -92,6 +104,13 @@ class MvtecLikeDataset(Dataset):
         for candidate in candidates:
             if candidate.exists():
                 return candidate
+        if not self._logged_missing_roi_sample:
+            LOGGER.warning(
+                "roi_mask_not_found sample=%s roi_root=%s fallback=full_image_roi",
+                sample.image_path,
+                self._roi_root,
+            )
+            self._logged_missing_roi_sample = True
         return None
 
     def _resolve_gt_mask_path(self, sample: _IndexedSample) -> Path | None:
@@ -120,29 +139,28 @@ class MvtecLikeDataset(Dataset):
         return self._load_binary_mask(roi_path)
 
     def _load_gt_mask(self, sample: _IndexedSample) -> torch.Tensor:
-        is_good = sample.class_name == self._cfg.class_good_name
         if self._mask_root is None:
-            if is_good:
-                return torch.zeros(
-                    (1, self._cfg.image_size, self._cfg.image_size),
-                    dtype=torch.float32,
+            if not self._logged_missing_mask_root:
+                LOGGER.warning(
+                    "mask_root_not_set fallback=zero_mask_treat_as_good",
                 )
-            raise DatasetContractError(
-                "mask_root is required for anomalous samples during "
-                "calibration/evaluation. "
-                f"Missing for sample={sample.image_path}"
+                self._logged_missing_mask_root = True
+            return torch.zeros(
+                (1, self._cfg.image_size, self._cfg.image_size),
+                dtype=torch.float32,
             )
 
         gt_mask_path = self._resolve_gt_mask_path(sample)
         if gt_mask_path is None:
-            if is_good:
-                return torch.zeros(
-                    (1, self._cfg.image_size, self._cfg.image_size),
-                    dtype=torch.float32,
+            if not self._logged_missing_gt_mask:
+                LOGGER.warning(
+                    "gt_mask_not_found sample=%s fallback=zero_mask_treat_as_good",
+                    sample.image_path,
                 )
-            raise DatasetContractError(
-                "Ground-truth mask missing for anomalous sample. "
-                f"class={sample.class_name} image={sample.image_path}"
+                self._logged_missing_gt_mask = True
+            return torch.zeros(
+                (1, self._cfg.image_size, self._cfg.image_size),
+                dtype=torch.float32,
             )
 
         return self._load_binary_mask(gt_mask_path)
@@ -150,9 +168,9 @@ class MvtecLikeDataset(Dataset):
     def __getitem__(self, index: int) -> dict[str, torch.Tensor | int | str]:
         sample = self._samples[index]
         image = self._load_image(sample.image_path)
-        label = 0 if sample.class_name == self._cfg.class_good_name else 1
         roi_mask = self._load_roi_mask(sample)
         gt_mask = self._load_gt_mask(sample)
+        label = int((gt_mask > 0.5).any().item())
 
         return {
             "image": image,

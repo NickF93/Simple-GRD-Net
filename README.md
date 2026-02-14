@@ -262,8 +262,8 @@ Notes:
 - Training can be `nominal_train_only=true`.
 - Official profile defaults use automatic device selection (`backend.device: "auto"`).
 - `roi_root` missing defaults ROI to all ones.
-- Missing ground-truth mask is accepted only for `good` samples and treated as all-zero mask.
-- Missing ground-truth mask for anomalous samples fails fast with explicit error.
+- Missing ROI mask falls back to full-image ROI (all ones) with warning logs.
+- Missing ground-truth mask falls back to all-zero mask and image is treated as good (label 0), with warning logs.
 - `patch_size` and `patch_stride` accept either scalar values or explicit pairs `[h, w]`.
 - `inference.run_acceptance_ratio=0.0` disables image-level acceptance voting and keeps patch-level thresholding only.
 

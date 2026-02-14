@@ -4,7 +4,6 @@ import pytest
 from PIL import Image
 
 from grdnet.config.schema import DataConfig
-from grdnet.core.exceptions import DatasetContractError
 from grdnet.data.datamodule import DataModule
 
 
@@ -32,7 +31,7 @@ def test_test_loader_allows_missing_mask_dir_for_good_samples(tmp_path: Path) ->
     assert float(batch["gt_mask"][0].sum().item()) == 0.0
 
 
-def test_test_loader_without_mask_dir_fails_for_anomalous_samples(
+def test_test_loader_without_mask_dir_defaults_anomalous_samples_to_good(
     tmp_path: Path,
 ) -> None:
     test_anomaly_dir = tmp_path / "test" / "crack"
@@ -53,8 +52,9 @@ def test_test_loader_without_mask_dir_fails_for_anomalous_samples(
     datamodule = DataModule(cfg)
     loader = datamodule.test_loader()
     assert loader is not None
-    with pytest.raises(DatasetContractError, match="mask_root is required"):
-        _ = next(iter(loader))
+    batch = next(iter(loader))
+    assert int(batch["label"][0]) == 0
+    assert float(batch["gt_mask"][0].sum().item()) == 0.0
 
 
 def test_mvtec_category_root_infers_ground_truth_mask_dir(tmp_path: Path) -> None:
@@ -145,3 +145,90 @@ def test_optional_test_and_calibration_loaders_return_none(tmp_path: Path) -> No
     datamodule = DataModule(cfg)
     assert datamodule.test_loader() is None
     assert datamodule.calibration_loader() is None
+
+
+def test_test_loader_uses_roi_when_configured(tmp_path: Path) -> None:
+    test_good_dir = tmp_path / "test" / "good"
+    roi_good_dir = tmp_path / "roi" / "good"
+    test_good_dir.mkdir(parents=True, exist_ok=True)
+    roi_good_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("L", (32, 32), color=0).save(test_good_dir / "000.png")
+    Image.new("L", (32, 32), color=0).save(roi_good_dir / "000.png")
+
+    cfg = DataConfig(
+        train_dir=tmp_path / "train",
+        test_dir=tmp_path / "test",
+        roi_dir=tmp_path / "roi",
+        image_size=32,
+        channels=1,
+        batch_size=1,
+        num_workers=0,
+        patch_size=(32, 32),
+        patch_stride=(32, 32),
+    )
+
+    datamodule = DataModule(cfg)
+    loader = datamodule.test_loader()
+    assert loader is not None
+    batch = next(iter(loader))
+    assert float(batch["roi_mask"][0].sum().item()) == 0.0
+
+
+def test_calibration_loader_uses_roi_when_configured(tmp_path: Path) -> None:
+    test_good_dir = tmp_path / "test" / "good"
+    roi_good_dir = tmp_path / "roi" / "good"
+    test_good_dir.mkdir(parents=True, exist_ok=True)
+    roi_good_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("L", (32, 32), color=0).save(test_good_dir / "000.png")
+    Image.new("L", (32, 32), color=0).save(roi_good_dir / "000.png")
+
+    cfg = DataConfig(
+        train_dir=tmp_path / "train",
+        calibration_dir=tmp_path / "test",
+        roi_dir=tmp_path / "roi",
+        image_size=32,
+        channels=1,
+        batch_size=1,
+        num_workers=0,
+        patch_size=(32, 32),
+        patch_stride=(32, 32),
+    )
+
+    datamodule = DataModule(cfg)
+    loader = datamodule.calibration_loader()
+    assert loader is not None
+    batch = next(iter(loader))
+    assert float(batch["roi_mask"][0].sum().item()) == 0.0
+
+
+def test_missing_roi_path_logs_warning_and_falls_back_to_ones(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    test_good_dir = tmp_path / "test" / "good"
+    test_good_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("L", (32, 32), color=0).save(test_good_dir / "000.png")
+
+    cfg = DataConfig(
+        train_dir=tmp_path / "train",
+        test_dir=tmp_path / "test",
+        roi_dir=tmp_path / "roi_missing",
+        image_size=32,
+        channels=1,
+        batch_size=1,
+        num_workers=0,
+        patch_size=(32, 32),
+        patch_stride=(32, 32),
+    )
+
+    datamodule = DataModule(cfg)
+    with caplog.at_level("WARNING"):
+        loader = datamodule.test_loader()
+        assert loader is not None
+        batch = next(iter(loader))
+
+    assert float(batch["roi_mask"][0].sum().item()) > 0.0
+    assert any(
+        "roi_dir_not_found" in rec.message or "roi_root_not_found" in rec.message
+        for rec in caplog.records
+    )

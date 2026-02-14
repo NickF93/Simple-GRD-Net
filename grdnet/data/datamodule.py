@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -10,6 +11,8 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 from grdnet.config.schema import DataConfig
 from grdnet.core.exceptions import DatasetContractError
 from grdnet.data.adapters.mvtec import MvtecLikeAdapter
+
+LOGGER = logging.getLogger(__name__)
 
 
 class DataModule:
@@ -60,6 +63,12 @@ class DataModule:
     ) -> Dataset:
         roi_root = self._cfg.roi_dir if use_roi else None
         mask_root = self._cfg.mask_dir if use_mask else None
+
+        if use_roi and roi_root is not None and not roi_root.exists():
+            LOGGER.warning(
+                "roi_dir_not_found path=%s fallback=full_image_roi",
+                roi_root,
+            )
 
         if self._is_mvtec_category_root(root):
             split_root = root / self._split_subdir(split_kind)
@@ -170,7 +179,7 @@ class DataModule:
         dataset = self._build_dataset(
             root=self._cfg.test_dir,
             nominal_only=False,
-            use_roi=False,
+            use_roi=True,
             use_mask=True,
             split_kind="test",
         )
@@ -183,7 +192,7 @@ class DataModule:
         dataset = self._build_dataset(
             root=self._cfg.calibration_dir,
             nominal_only=False,
-            use_roi=False,
+            use_roi=True,
             use_mask=True,
             split_kind="calibration",
         )

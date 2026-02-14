@@ -19,6 +19,8 @@ from grdnet.training import TrainingEngine
 from grdnet.training.checkpoints import load_checkpoint
 
 LOGGER = logging.getLogger(__name__)
+_ANSI_CYAN = "\033[36m"
+_ANSI_RESET = "\033[0m"
 
 
 def _is_mvtec_category_root(root: Path) -> bool:
@@ -47,6 +49,55 @@ def _scope_path_to_category(path: Path | None, category: str) -> Path | None:
     if category in categories:
         return path / category
     return path
+
+
+def _is_mvtec_split_dir(path: Path) -> bool:
+    return path.name in {"train", "test", "ground_truth"}
+
+
+def _infer_category_root(cfg: ExperimentConfig) -> Path | None:
+    candidates = (
+        cfg.data.train_dir,
+        cfg.data.test_dir,
+        cfg.data.mask_dir,
+    )
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        if _is_mvtec_category_root(candidate):
+            return candidate
+        parent = candidate.parent
+        if _is_mvtec_split_dir(candidate) and _is_mvtec_category_root(parent):
+            return parent
+    return None
+
+
+def _display_path(path: Path | None) -> str:
+    if path is None:
+        return "<none>"
+    return str(path)
+
+
+def _log_benchmark_category_paths(
+    *,
+    command: str,
+    category: str,
+    cfg: ExperimentConfig,
+) -> None:
+    root = _infer_category_root(cfg)
+    LOGGER.info(
+        "%sbenchmark_category_paths command=%s category=%s root=%s train=%s "
+        "test=%s mask=%s roi=%s%s",
+        _ANSI_CYAN,
+        command,
+        category,
+        _display_path(root),
+        _display_path(cfg.data.train_dir),
+        _display_path(cfg.data.test_dir),
+        _display_path(cfg.data.mask_dir),
+        _display_path(cfg.data.roi_dir),
+        _ANSI_RESET,
+    )
 
 
 def _scoped_category_cfg(cfg: ExperimentConfig, category: str) -> ExperimentConfig:
@@ -186,6 +237,11 @@ def run_train(config_path: str) -> int:
         for category in categories:
             LOGGER.info("benchmark_category_start command=train category=%s", category)
             scoped_cfg = _scoped_category_cfg(cfg, category)
+            _log_benchmark_category_paths(
+                command="train",
+                category=category,
+                cfg=scoped_cfg,
+            )
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
@@ -237,6 +293,11 @@ def run_calibrate(config_path: str, checkpoint: str | None) -> int:
                 category,
             )
             scoped_cfg = _scoped_category_cfg(cfg, category)
+            _log_benchmark_category_paths(
+                command="calibrate",
+                category=category,
+                cfg=scoped_cfg,
+            )
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
@@ -303,6 +364,11 @@ def run_evaluate(config_path: str, checkpoint: str | None) -> int:
         for category in categories:
             LOGGER.info("benchmark_category_start command=eval category=%s", category)
             scoped_cfg = _scoped_category_cfg(cfg, category)
+            _log_benchmark_category_paths(
+                command="eval",
+                category=category,
+                cfg=scoped_cfg,
+            )
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,
@@ -386,6 +452,11 @@ def run_infer(config_path: str, checkpoint: str | None) -> int:
         for category in categories:
             LOGGER.info("benchmark_category_start command=infer category=%s", category)
             scoped_cfg = _scoped_category_cfg(cfg, category)
+            _log_benchmark_category_paths(
+                command="infer",
+                category=category,
+                cfg=scoped_cfg,
+            )
             scoped_cfg, backend, datamodule, reporters = _setup_from_cfg(
                 scoped_cfg,
                 config_path=config_path,

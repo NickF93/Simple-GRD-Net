@@ -531,3 +531,67 @@ def test_run_infer_benchmark_root_runs_per_category(
         "DeepIndustrial-SN 2026 Official [bottle]",
         "DeepIndustrial-SN 2026 Official [zipper]",
     ]
+
+
+def test_log_benchmark_category_paths_includes_expected_directories(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    category_root = tmp_path / "mvtec" / "bottle"
+    (category_root / "train").mkdir(parents=True, exist_ok=True)
+    (category_root / "test").mkdir(parents=True, exist_ok=True)
+    (category_root / "ground_truth").mkdir(parents=True, exist_ok=True)
+    (category_root / "roi").mkdir(parents=True, exist_ok=True)
+
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.data.train_dir = category_root
+    cfg.data.test_dir = category_root
+    cfg.data.mask_dir = category_root / "ground_truth"
+    cfg.data.roi_dir = category_root / "roi"
+
+    emitted: list[str] = []
+
+    def _capture(message: str, *args) -> None:
+        emitted.append(message % args)
+
+    monkeypatch.setattr("grdnet.pipeline.runner.LOGGER.info", _capture)
+    runner._log_benchmark_category_paths(command="eval", category="bottle", cfg=cfg)
+
+    assert len(emitted) == 1
+    line = emitted[0]
+    assert "\x1b[36m" in line
+    assert "benchmark_category_paths command=eval category=bottle" in line
+    assert f"root={category_root}" in line
+    assert f"train={category_root}" in line
+    assert f"test={category_root}" in line
+    assert f"mask={category_root / 'ground_truth'}" in line
+    assert f"roi={category_root / 'roi'}" in line
+
+
+def test_log_benchmark_category_paths_root_inferred_from_split_dir(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    category_root = tmp_path / "mvtec" / "zipper"
+    (category_root / "train").mkdir(parents=True, exist_ok=True)
+    (category_root / "test").mkdir(parents=True, exist_ok=True)
+    (category_root / "ground_truth").mkdir(parents=True, exist_ok=True)
+
+    cfg = load_experiment_config(Path("configs/profiles/deepindustrial_sn_2026.yaml"))
+    cfg.data.train_dir = category_root / "train"
+    cfg.data.test_dir = category_root / "test"
+    cfg.data.mask_dir = category_root / "ground_truth"
+    cfg.data.roi_dir = None
+
+    emitted: list[str] = []
+
+    def _capture(message: str, *args) -> None:
+        emitted.append(message % args)
+
+    monkeypatch.setattr("grdnet.pipeline.runner.LOGGER.info", _capture)
+    runner._log_benchmark_category_paths(command="infer", category="zipper", cfg=cfg)
+
+    assert len(emitted) == 1
+    line = emitted[0]
+    assert f"root={category_root}" in line
+    assert "roi=<none>" in line
