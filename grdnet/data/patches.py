@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as functional
+from torch.nn import functional
 
 
 def extract_patches(

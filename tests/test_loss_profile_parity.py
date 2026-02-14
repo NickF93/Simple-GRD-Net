@@ -1,5 +1,5 @@
 import torch
-import torch.nn.functional as functional
+from torch.nn import functional
 
 from grdnet.config.loader import load_experiment_config
 from grdnet.losses.pytorch_losses import GrdNetLossComputer

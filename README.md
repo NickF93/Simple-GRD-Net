@@ -136,31 +136,31 @@ Top-level package (`grdnet/`) is layered and modular:
 
 ```mermaid
 flowchart LR
-    X[Input Patch X] --> P[Perturbation Pq<br/>Perlin + Geometric Aug]
-    P --> XN[X*]
-    XN --> G[Generator G<br/>Encoder-Decoder-Encoder]
-    G --> XR[X_hat]
-    G --> ZR[z_hat]
-    XN --> E1[Encoder output z]
+    X[Input patch X] --> P[Perturbation Pq]
+    P --> XN[Noisy patch Xn]
+    XN --> G[Generator G EDE]
+    G --> XR[Reconstruction X hat]
+    G --> ZR[Latent z hat]
+    XN --> E1[Latent z]
 
     X --> D[Discriminator C]
     XR --> D
-    D --> FR[Feature C(X)]
-    D --> FF[Feature C(X_hat)]
-    D --> PR[Real/Fake prob]
+    D --> FR[Feature on X]
+    D --> FF[Feature on X hat]
+    D --> PR[Real fake probability]
 
-    X --> LC[L_con]
+    X --> LC[Context loss L con]
     XR --> LC
-    E1 --> LE[L_enc]
+    E1 --> LE[Encoder loss L enc]
     ZR --> LE
-    FR --> LA[L_adv]
+    FR --> LA[Adversarial loss L adv]
     FF --> LA
 
-    N[Noise branch N,M,beta] --> LN[L_nse optional]
+    N[Noise branch N M beta] --> LN[Noise loss L nse optional]
     XR --> LN
     XN --> LN
 
-    LA --> LG[L_gen]
+    LA --> LG[Generator loss L gen]
     LC --> LG
     LE --> LG
     LN --> LG
@@ -170,36 +170,36 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    X[Input Patch X] --> P[Perturbation Pq]
-    P --> XN[X_n]
+    X[Input patch X] --> P[Perturbation Pq]
+    P --> XN[Noisy patch Xn]
     XN --> G[Generator G]
-    G --> XR[X_hat]
-    G --> ZR[z_hat]
-    XN --> Z[z]
+    G --> XR[Reconstruction X hat]
+    G --> ZR[Latent z hat]
+    XN --> Z[Latent z]
 
     X --> D[Discriminator C]
     XR --> D
-    D --> FCX[F_C(X)]
-    D --> FCXR[F_C(X_hat)]
+    D --> FCX[Feature C on X]
+    D --> FCXR[Feature C on X hat]
 
-    XN --> CAT[Concat(X_n, X_hat)]
+    XN --> CAT[Concat Xn and X hat]
     XR --> CAT
-    CAT --> U[Discriminative U-Net Delta]
-    U --> AD[A_discr]
-    ROI[ROI mask] --> I[Intersection I=A_discr*ROI]
+    CAT --> U[Discriminative U Net Delta]
+    U --> AD[Anomaly map A discr]
+    ROI[ROI mask] --> I[Intersection I]
     AD --> I
-    I --> FL[Focal Loss FL(I,M)]
+    I --> FL[Focal loss FL]
 
-    X --> LCON[L_con]
+    X --> LCON[Context loss L con]
     XR --> LCON
-    Z --> LENC[L_enc]
+    Z --> LENC[Encoder loss L enc]
     ZR --> LENC
-    FCX --> LADV[L_adv]
+    FCX --> LADV[Adversarial loss L adv]
     FCXR --> LADV
-    LADV --> LGEN[L_gen]
+    LADV --> LGEN[Generator loss L gen]
     LCON --> LGEN
     LENC --> LGEN
-    LGEN --> LTOT[L_tot = L_gen + FL]
+    LGEN --> LTOT[Total loss L tot]
     FL --> LTOT
 ```
 

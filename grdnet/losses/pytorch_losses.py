@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as functional
 from torch import nn
+from torch.nn import functional
 
 from grdnet.config.schema import ExperimentConfig
 

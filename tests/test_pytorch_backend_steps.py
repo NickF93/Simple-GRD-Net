@@ -122,7 +122,6 @@ def test_autocast_mode_switches_with_amp_flag(monkeypatch) -> None:
 
         def __exit__(self, exc_type, exc, tb):
             _ = exc_type, exc, tb
-            return None
 
     monkeypatch.setattr("torch.autocast", lambda **kwargs: _FakeAutocast())
     backend._amp_enabled = True

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 import logging
-from typing import Iterable
+from collections.abc import Iterable
+from contextlib import nullcontext
 
 import torch
 from torch import nn
