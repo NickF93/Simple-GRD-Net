@@ -1,26 +1,13 @@
-'''
-The GRD-Net module.
+"""Official GRD-Net research framework.
 
-This module contains all the classes and functions needed to build the GRD-Net architecture.
-'''
+This package provides a configurable implementation of:
+- GRD-Net (2023): full generative-reconstructive-discriminative model with ROI-aware
+  segmentation supervision.
+- DeepIndustrial-SN (2026): runtime-optimized profile that uses the generative
+  branch for patch-wise anomaly scoring and heatmap localization.
+"""
 
-from . import util
-from . import grd_nets
-from . import trainer
-from . import perlin
-from . import augment
-from . import aggregator
-from . import data
+from grdnet.config.loader import load_experiment_config
 
-__all__ = [
-    'util',
-    'grd_nets',
-    'trainer',
-    'perlin',
-    'augment',
-    'aggregator',
-    'data',
-]
-
-__version__ = '0.0.1'
-__author__ = 'Niccolò Ferrari'
+__all__ = ["load_experiment_config"]
+__version__ = "1.0.0"

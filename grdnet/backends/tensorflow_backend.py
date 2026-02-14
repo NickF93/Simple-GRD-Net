@@ -1,0 +1,50 @@
+"""TensorFlow backend scaffold (placeholder-only in v1)."""
+
+from __future__ import annotations
+
+import torch
+
+from grdnet.backends.base import (
+    BackendStrategy,
+    ModelBundle,
+    OptimizerBundle,
+    SchedulerBundle,
+    StepOutput,
+)
+
+
+class TensorFlowScaffoldBackend(BackendStrategy):
+    """Scaffold backend exposing future-compatible API contracts."""
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self._device = torch.device("cpu")
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    @staticmethod
+    def _raise() -> None:
+        raise NotImplementedError(
+            "TensorFlow/Keras backend is scaffold-only in v1. "
+            "Use backend.name='pytorch' for full execution."
+        )
+
+    def build_models(self) -> ModelBundle:
+        self._raise()
+
+    def build_optimizers(self, models: ModelBundle) -> OptimizerBundle:
+        self._raise()
+
+    def build_schedulers(self, optimizers: OptimizerBundle) -> SchedulerBundle:
+        self._raise()
+
+    def train_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
+        self._raise()
+
+    def eval_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
+        self._raise()
+
+    def infer_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
+        self._raise()

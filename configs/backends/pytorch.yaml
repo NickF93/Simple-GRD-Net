@@ -1,0 +1,4 @@
+backend:
+  name: "pytorch"
+  device: "auto"
+  mixed_precision: false

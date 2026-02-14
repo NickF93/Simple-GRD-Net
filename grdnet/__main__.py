@@ -1,4 +1,4 @@
-"""Legacy entrypoint forwarding to the new CLI."""
+"""Module entrypoint for `python -m grdnet`."""
 
 from grdnet.cli import main
 
