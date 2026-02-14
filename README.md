@@ -24,45 +24,45 @@ Paper-level equations implemented as profile defaults:
 
 Synthetic perturbation:
 
-\[
+$$
 (X_n, M) = P_q(X)
-\]
+$$
 
 Adversarial feature loss:
 
-\[
+$$
 L_{adv} = L_2\big(F_C(X), F_C(\hat{X})\big)
-\]
+$$
 
 Contextual loss:
 
-\[
+$$
 L_{con} = w_a L_1(X, \hat{X}) + w_b L_{SSIM}(X, \hat{X})
-\]
+$$
 
 Encoder consistency:
 
-\[
+$$
 L_{enc} = L_1(z, \hat{z})
-\]
+$$
 
 Generator objective:
 
-\[
+$$
 L_{gen} = w_1 L_{adv} + w_2 L_{con} + w_3 L_{enc}
-\]
+$$
 
 ROI intersection for discriminative supervision:
 
-\[
+$$
 I = A_{discr} \odot ROI_{input}
-\]
+$$
 
 Total full-profile objective:
 
-\[
+$$
 L_{tot} = L_{gen} + FL(I, M)
-\]
+$$
 
 where `FL` is focal loss.
 
@@ -72,33 +72,33 @@ This profile keeps the generative adversarial core, with deployment-oriented con
 
 Perturbation mechanism:
 
-\[
+$$
 X^* = (1 - M)\odot X + (1-\beta)M\odot X + \beta N, \quad \beta\sim U(0.5, 1.0)
-\]
+$$
 
 Noise regularization term:
 
-\[
+$$
 L_{nse} = w_4 \cdot L_2\left(\left|(1-\beta)\hat{M}\odot\hat{X} - M\odot X\right|,\, \beta N\right)
-\]
+$$
 
 Contextual update (Huber + SSIM):
 
-\[
+$$
 L_{con} = w_a L_{Huber}(X, \hat{X}) + w_b L_{SSIM}(X, \hat{X})
-\]
+$$
 
 Anomaly score:
 
-\[
+$$
 \phi = 1 - SSIM(X, \hat{X})
-\]
+$$
 
 Heatmap:
 
-\[
+$$
 H = \lvert X - \hat{X} \rvert
-\]
+$$
 
 with per-sample min-max normalization.
 
