@@ -1,6 +1,10 @@
+import os
+
 import pytest
 
 from grdnet.cli import main
+from grdnet.core.determinism import CUBLAS_WORKSPACE_DEFAULT, CUBLAS_WORKSPACE_ENV
+from grdnet.core.exceptions import ConfigurationError
 
 
 @pytest.mark.parametrize(
@@ -31,3 +35,51 @@ def test_cli_runs_runtime_guard(monkeypatch) -> None:
     monkeypatch.setattr("grdnet.cli.run_validate_config", lambda _cfg: 0)
     assert main(["validate-config", "-c", "a.yaml"]) == 0
     assert calls["guard"] == 1
+
+
+def test_cli_sets_cublas_workspace_for_deterministic_cuda(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        (
+            "backend:\n"
+            "  name: pytorch\n"
+            "  device: auto\n"
+            "system:\n"
+            "  deterministic: true\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv(CUBLAS_WORKSPACE_ENV, raising=False)
+    monkeypatch.setattr("grdnet.cli.enforce_runtime_versions", lambda: None)
+    monkeypatch.setattr("grdnet.cli.run_train", lambda _cfg: 0)
+
+    assert main(["train", "-c", str(cfg)]) == 0
+    assert os.environ.get(CUBLAS_WORKSPACE_ENV) == CUBLAS_WORKSPACE_DEFAULT
+
+
+def test_cli_rejects_invalid_cublas_workspace_for_deterministic_cuda(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        (
+            "backend:\n"
+            "  name: pytorch\n"
+            "  device: cuda\n"
+            "system:\n"
+            "  deterministic: true\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv(CUBLAS_WORKSPACE_ENV, "invalid")
+    monkeypatch.setattr("grdnet.cli.enforce_runtime_versions", lambda: None)
+    monkeypatch.setattr("grdnet.cli.run_train", lambda _cfg: 0)
+
+    with pytest.raises(ConfigurationError, match=CUBLAS_WORKSPACE_ENV):
+        _ = main(["train", "-c", str(cfg)])

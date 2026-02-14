@@ -10,7 +10,7 @@ from grdnet.backends.base import BackendStrategy
 from grdnet.config.loader import load_experiment_config
 from grdnet.config.schema import ExperimentConfig
 from grdnet.core.logging import configure_logging
-from grdnet.core.reproducibility import set_global_seed
+from grdnet.core.reproducibility import set_global_seed, validate_determinism_runtime
 from grdnet.data import DataModule
 from grdnet.inference import InferenceEngine
 from grdnet.reporting import ConsoleReporter, CsvReporter
@@ -149,6 +149,11 @@ def _setup_from_cfg(
 
     LOGGER.info("initializing_backend")
     backend = create_backend(cfg)
+    validate_determinism_runtime(
+        deterministic=cfg.system.deterministic,
+        backend_name=cfg.backend.name,
+        backend_device=getattr(backend, "device", None),
+    )
     LOGGER.info("initializing_datamodule")
     datamodule = DataModule(cfg.data)
     LOGGER.info("initializing_reporters")
