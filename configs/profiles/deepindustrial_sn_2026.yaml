@@ -6,7 +6,7 @@ profile:
 backend:
   name: "pytorch"
   device: "auto"
-  mixed_precision: true
+  mixed_precision: false
 
 system:
   seed: 1337
@@ -26,7 +26,7 @@ data:
   image_size: 256
   channels: 3
   # Conservative default for 5-6 GB GPUs. Use 32 on larger GPUs for paper-scale runs.
-  batch_size: 32
+  batch_size: 16
   num_workers: 4
   patch_size: [256, 256]
   patch_stride: [256, 256]
@@ -51,9 +51,9 @@ model:
   #decoder_upsample_position: "first"
   base_features: 128
   latent_dim: 128
-  stages: [3, 3, 3, 3]
-  encoder_downsample_position: "last"
-  decoder_upsample_position: "last"
+  stages: [2, 2, 2, 2]
+  encoder_downsample_position: "first"
+  decoder_upsample_position: "first"
   dense_bottleneck: true
   segmentator_base_features: 64
 
