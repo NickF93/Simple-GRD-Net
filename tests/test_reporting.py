@@ -45,3 +45,23 @@ def test_console_reporter_emits_json_payloads(monkeypatch) -> None:
     assert decoded[0]["event"] == "epoch_summary"
     assert decoded[1]["event"] == "evaluation_summary"
     assert decoded[2]["event"] == "prediction_summary"
+
+
+def test_csv_reporter_truncates_existing_predictions_and_ignores_empty_rows(
+    tmp_path: Path,
+) -> None:
+    cfg = load_experiment_config("configs/profiles/deepindustrial_sn_2026.yaml")
+    cfg.training.output_dir = tmp_path / "reports"
+    cfg.reporting.csv_metrics_filename = "metrics.csv"
+    cfg.reporting.csv_predictions_filename = "predictions.csv"
+    cfg.training.output_dir.mkdir(parents=True, exist_ok=True)
+    existing_predictions = (
+        cfg.training.output_dir / cfg.reporting.csv_predictions_filename
+    )
+    existing_predictions.write_text("stale,data\n", encoding="utf-8")
+
+    reporter = CsvReporter(cfg)
+    assert not existing_predictions.exists()
+
+    reporter.write_predictions([])
+    assert not existing_predictions.exists()

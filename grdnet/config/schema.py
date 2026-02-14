@@ -19,6 +19,7 @@ class ProfileConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode(self) -> ProfileConfig:
+        """Ensure profile-mode feature combinations remain valid."""
         if self.mode == "deepindustrial_sn_2026" and self.use_segmentator:
             raise ValueError(
                 "deepindustrial_sn_2026 must disable segmentator. "
@@ -71,6 +72,7 @@ class DataConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_patch_shape(self) -> DataConfig:
+        """Validate patch dimensions and stride constraints."""
         patch_h, patch_w = self.patch_size
         stride_h, stride_w = self.patch_stride
         if patch_h < 16 or patch_w < 16:

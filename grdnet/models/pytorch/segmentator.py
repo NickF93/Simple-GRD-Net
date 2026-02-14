@@ -19,6 +19,7 @@ class _ConvBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply two convolution-BN-ReLU layers."""
         return self.block(x)
 
 
@@ -65,6 +66,7 @@ class UNetSegmentator(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Predict a one-channel anomaly mask from concatenated inputs."""
         e1 = self.enc1(x)
         e2 = self.enc2(self.pool(e1))
         e3 = self.enc3(self.pool(e2))

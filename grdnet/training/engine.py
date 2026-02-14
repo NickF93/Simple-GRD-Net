@@ -119,6 +119,7 @@ class TrainingEngine:
             self.backend.schedulers.segmentator.step()
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader | None) -> None:
+        """Execute the full epoch loop with optional validation."""
         checkpoint_dir = Path(self.cfg.training.checkpoint_dir)
         LOGGER.info("preparing_checkpoint_directory path=%s", checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)

@@ -34,6 +34,7 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return feature embedding and real/fake probability."""
         features = self.encoder(x)
         logits = self.classifier(features)
         return features, logits

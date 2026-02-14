@@ -34,8 +34,12 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
-ignore = ["PLR0913", "PLR2004"]
+select = ["E", "F", "I", "UP", "B", "SIM", "PL", "D"]
+ignore = ["PLR0913", "PLR2004", "D105", "D107", "D203", "D213", "D401", "D413"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["D"]
+"grdnet/**/__init__.py" = ["D104"]
 
 [tool.mypy]
 python_version = "3.11"

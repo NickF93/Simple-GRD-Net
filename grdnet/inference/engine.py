@@ -54,143 +54,136 @@ class InferenceEngine:
         return float(0.5 * (tpr + tnr))
 
     @staticmethod
-    def _group_paths(paths: np.ndarray) -> tuple[list[str], dict[str, np.ndarray]]:
-        groups: dict[str, list[int]] = {}
-        ordered_paths: list[str] = []
-        for idx, path in enumerate(paths.tolist()):
-            if path not in groups:
-                groups[path] = []
-                ordered_paths.append(path)
-            groups[path].append(idx)
-
-        np_groups = {
-            path: np.asarray(indices, dtype=np.int64)
-            for path, indices in groups.items()
-        }
-        return ordered_paths, np_groups
-
-    def _aggregate_image_level(
-        self,
+    def _validate_batch_patch_layout(
         *,
-        patch_paths: np.ndarray,
-        patch_labels: np.ndarray,
+        images: torch.Tensor,
         patch_scores: np.ndarray,
-        patch_preds: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, str | float | int]]]:
-        ordered_paths, groups = self._group_paths(patch_paths)
-
-        image_labels: list[int] = []
-        image_scores: list[float] = []
-        image_preds: list[int] = []
-        image_rows: list[dict[str, str | float | int]] = []
-
-        for path in ordered_paths:
-            indices = groups[path]
-            labels = patch_labels[indices]
-            preds = patch_preds[indices]
-
-            anomaly_ratio = float(np.mean(preds))
-            image_label = int(np.max(labels))
-            image_pred = int(anomaly_ratio >= self.cfg.inference.run_acceptance_ratio)
-            image_score = anomaly_ratio
-
-            image_labels.append(image_label)
-            image_scores.append(image_score)
-            image_preds.append(image_pred)
-            image_rows.append(
-                {
-                    "path": path,
-                    "patch_count": int(indices.size),
-                    "image_label": image_label,
-                    "anomalous_patch_ratio": anomaly_ratio,
-                    "image_prediction": image_pred,
-                }
+        expected_patches_per_image: int | None,
+    ) -> tuple[int, int]:
+        """Validate and return `(n_images, n_patches_per_image)`."""
+        n_images = images.shape[0]
+        n_patches = patch_scores.shape[0]
+        if n_images <= 0 or n_patches % n_images != 0:
+            raise ValueError(
+                "Patch tensor cannot be evenly mapped back to batch images"
             )
+        n_patches_per_image = n_patches // n_images
+        if (
+            expected_patches_per_image is not None
+            and expected_patches_per_image != n_patches_per_image
+        ):
+            raise ValueError(
+                "Patch layout changed across batches. "
+                "Check data.patch_size/patch_stride and batch tensor consistency."
+            )
+        return n_images, n_patches_per_image
 
-        return (
-            np.asarray(image_labels, dtype=np.int64),
-            np.asarray(image_scores, dtype=np.float64),
-            np.asarray(image_preds, dtype=np.int64),
-            image_rows,
-        )
-
-    def _collect_scores(
+    def _collect_patch_arrays(
         self,
         loader: DataLoader,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict[str, str | float | int]]]:
-        all_scores: list[float] = []
-        all_labels: list[int] = []
-        all_paths: list[str] = []
-        rows: list[dict[str, str | float | int]] = []
+    ) -> tuple[np.ndarray, np.ndarray, int]:
+        """Collect patch labels/scores without path-level buffering."""
+        patch_label_chunks: list[np.ndarray] = []
+        patch_score_chunks: list[np.ndarray] = []
+        n_patches_per_image: int | None = None
 
         for batch in loader:
             output = self.backend.infer_step(batch)
-            patch_scores = output.patch_scores.detach().cpu().numpy()
+            patch_scores = output.patch_scores.detach().cpu().numpy().astype(np.float64)
 
             gt_mask = batch["gt_mask"]
             if not isinstance(gt_mask, torch.Tensor):
                 raise TypeError("batch['gt_mask'] must be tensor")
-            labels = self._patch_labels(gt_mask)
+            labels = self._patch_labels(gt_mask).astype(np.int64)
 
             images = batch["image"]
             if not isinstance(images, torch.Tensor):
                 raise TypeError("batch['image'] must be tensor")
-            n_images = images.shape[0]
-            n_patches = patch_scores.shape[0]
-            if n_images <= 0 or n_patches % n_images != 0:
-                raise ValueError(
-                    "Patch tensor cannot be evenly mapped back to batch images"
-                )
-            n_patches_per_image = n_patches // n_images
+            _, n_patches_per_image = self._validate_batch_patch_layout(
+                images=images,
+                patch_scores=patch_scores,
+                expected_patches_per_image=n_patches_per_image,
+            )
 
-            paths_raw = batch["path"]
-            if not isinstance(paths_raw, list):
-                raise TypeError("batch['path'] must be list[str]")
-            if len(paths_raw) != n_images:
-                raise ValueError("batch['path'] length must match batch image count")
+            patch_label_chunks.append(labels)
+            patch_score_chunks.append(patch_scores)
 
-            for image_idx, image_path in enumerate(paths_raw):
-                start = image_idx * n_patches_per_image
-                end = start + n_patches_per_image
-                for patch_idx, flat_idx in enumerate(range(start, end), start=0):
-                    rows.append(
-                        {
-                            "path": image_path,
-                            "patch_index": int(patch_idx),
-                            "score": float(patch_scores[flat_idx]),
-                            "label": int(labels[flat_idx]),
-                        }
-                    )
-                    all_paths.append(image_path)
-                    all_scores.append(float(patch_scores[flat_idx]))
-                    all_labels.append(int(labels[flat_idx]))
+        if not patch_label_chunks:
+            raise ValueError("Inference loader produced no batches")
+        if n_patches_per_image is None:
+            raise ValueError("Unable to resolve patch layout from inference loader")
 
+        patch_labels = np.concatenate(patch_label_chunks, axis=0)
+        patch_scores = np.concatenate(patch_score_chunks, axis=0)
+        return patch_labels, patch_scores, n_patches_per_image
+
+    def _emit_prediction_rows(
+        self,
+        rows: list[dict[str, str | float | int]],
+    ) -> None:
+        """Write one bounded prediction chunk to all reporters."""
+        if not rows:
+            return
+        for reporter in self.reporters:
+            reporter.write_predictions(rows)
+
+    @staticmethod
+    def _image_labels_from_patch_labels(
+        patch_labels: np.ndarray,
+        n_patches_per_image: int,
+    ) -> np.ndarray:
+        """Collapse patch labels into one image label by max pooling."""
         return (
-            np.asarray(all_labels, dtype=np.int64),
-            np.asarray(all_scores, dtype=np.float64),
-            np.asarray(all_paths),
-            rows,
+            patch_labels.reshape(-1, n_patches_per_image)
+            .max(axis=1)
+            .astype(np.int64, copy=False)
         )
+
+    @staticmethod
+    def _image_scores_from_patch_preds(
+        patch_preds: np.ndarray,
+        n_patches_per_image: int,
+    ) -> np.ndarray:
+        """Collapse patch predictions into image anomaly ratio scores."""
+        return patch_preds.reshape(-1, n_patches_per_image).mean(
+            axis=1,
+            dtype=np.float64,
+        )
+
+    @staticmethod
+    def _candidate_thresholds(patch_scores: np.ndarray) -> np.ndarray:
+        """Build bounded threshold candidates for image-ratio calibration."""
+        thresholds = np.unique(patch_scores)
+        if thresholds.size <= 2048:
+            return thresholds
+        quantiles = np.linspace(0.0, 1.0, num=2048, dtype=np.float64)
+        sampled = np.quantile(patch_scores, quantiles, method="linear")
+        return np.unique(sampled)
 
     def _calibrate_threshold_image_ratio(
         self,
         *,
         patch_labels: np.ndarray,
         patch_scores: np.ndarray,
-        patch_paths: np.ndarray,
+        n_patches_per_image: int,
     ) -> float:
-        thresholds = np.unique(patch_scores)
+        thresholds = self._candidate_thresholds(patch_scores)
         best_threshold = float(thresholds[0])
         best_bacc = -1.0
+        image_labels = self._image_labels_from_patch_labels(
+            patch_labels,
+            n_patches_per_image,
+        )
+        patch_score_matrix = patch_scores.reshape(-1, n_patches_per_image)
 
         for threshold in thresholds:
-            patch_preds = (patch_scores >= threshold).astype(np.int64)
-            image_labels, _, image_preds, _ = self._aggregate_image_level(
-                patch_paths=patch_paths,
-                patch_labels=patch_labels,
-                patch_scores=patch_scores,
-                patch_preds=patch_preds,
+            image_scores = (patch_score_matrix >= threshold).mean(
+                axis=1,
+                dtype=np.float64,
             )
+            image_preds = (
+                image_scores >= self.cfg.inference.run_acceptance_ratio
+            ).astype(np.int64)
             bacc = self._binary_balanced_accuracy(image_labels, image_preds)
             if bacc > best_bacc:
                 best_bacc = bacc
@@ -199,13 +192,16 @@ class InferenceEngine:
         return best_threshold
 
     def calibrate(self, loader: DataLoader) -> float:
-        patch_labels, patch_scores, patch_paths, _ = self._collect_scores(loader)
+        """Calibrate patch threshold, then report patch and image metrics."""
+        patch_labels, patch_scores, n_patches_per_image = self._collect_patch_arrays(
+            loader
+        )
 
         if self.cfg.inference.run_acceptance_ratio > 0.0:
             threshold = self._calibrate_threshold_image_ratio(
                 patch_labels=patch_labels,
                 patch_scores=patch_scores,
-                patch_paths=patch_paths,
+                n_patches_per_image=n_patches_per_image,
             )
         else:
             threshold = calibrate_threshold_balanced_accuracy(
@@ -219,11 +215,13 @@ class InferenceEngine:
             threshold,
         )
         patch_preds = (patch_scores >= threshold).astype(np.int64)
-        image_labels, image_scores, _, _ = self._aggregate_image_level(
-            patch_paths=patch_paths,
-            patch_labels=patch_labels,
-            patch_scores=patch_scores,
-            patch_preds=patch_preds,
+        image_labels = self._image_labels_from_patch_labels(
+            patch_labels,
+            n_patches_per_image,
+        )
+        image_scores = self._image_scores_from_patch_preds(
+            patch_preds,
+            n_patches_per_image,
         )
         image_metrics = binary_classification_metrics(
             image_labels,
@@ -241,19 +239,86 @@ class InferenceEngine:
         return threshold
 
     def evaluate(self, loader: DataLoader, threshold: float) -> dict[str, float]:
-        patch_labels, patch_scores, patch_paths, rows = self._collect_scores(loader)
+        """Run evaluation with bounded-memory prediction streaming."""
+        patch_label_chunks: list[np.ndarray] = []
+        patch_score_chunks: list[np.ndarray] = []
+        image_label_chunks: list[np.ndarray] = []
+        image_score_chunks: list[np.ndarray] = []
+        n_patches_per_image: int | None = None
+
+        for batch in loader:
+            output = self.backend.infer_step(batch)
+            patch_scores = output.patch_scores.detach().cpu().numpy().astype(np.float64)
+
+            gt_mask = batch["gt_mask"]
+            if not isinstance(gt_mask, torch.Tensor):
+                raise TypeError("batch['gt_mask'] must be tensor")
+            patch_labels = self._patch_labels(gt_mask).astype(np.int64)
+
+            images = batch["image"]
+            if not isinstance(images, torch.Tensor):
+                raise TypeError("batch['image'] must be tensor")
+            n_images, n_patches_per_image = self._validate_batch_patch_layout(
+                images=images,
+                patch_scores=patch_scores,
+                expected_patches_per_image=n_patches_per_image,
+            )
+
+            paths_raw = batch["path"]
+            if not isinstance(paths_raw, list):
+                raise TypeError("batch['path'] must be list[str]")
+            if len(paths_raw) != n_images:
+                raise ValueError("batch['path'] length must match batch image count")
+
+            patch_preds = (patch_scores >= threshold).astype(np.int64)
+            patch_pred_matrix = patch_preds.reshape(n_images, n_patches_per_image)
+            patch_label_matrix = patch_labels.reshape(n_images, n_patches_per_image)
+            patch_score_matrix = patch_scores.reshape(n_images, n_patches_per_image)
+            image_labels = patch_label_matrix.max(axis=1).astype(np.int64)
+            image_scores = patch_pred_matrix.mean(axis=1, dtype=np.float64)
+            image_preds = (
+                image_scores >= self.cfg.inference.run_acceptance_ratio
+            ).astype(np.int64)
+
+            chunk_rows: list[dict[str, str | float | int]] = []
+            for image_idx, image_path in enumerate(paths_raw):
+                anomaly_ratio = float(image_scores[image_idx])
+                image_pred = int(image_preds[image_idx])
+                image_label = int(image_labels[image_idx])
+                for patch_idx in range(n_patches_per_image):
+                    chunk_rows.append(
+                        {
+                            "path": image_path,
+                            "patch_index": int(patch_idx),
+                            "score": float(patch_score_matrix[image_idx, patch_idx]),
+                            "label": int(patch_label_matrix[image_idx, patch_idx]),
+                            "patch_prediction": int(
+                                patch_pred_matrix[image_idx, patch_idx]
+                            ),
+                            "image_label": image_label,
+                            "image_prediction": image_pred,
+                            "anomalous_patch_ratio": anomaly_ratio,
+                        }
+                    )
+            self._emit_prediction_rows(chunk_rows)
+
+            patch_label_chunks.append(patch_labels)
+            patch_score_chunks.append(patch_scores)
+            image_label_chunks.append(image_labels)
+            image_score_chunks.append(image_scores)
+
+        if n_patches_per_image is None:
+            raise ValueError("Inference loader produced no batches")
+
+        patch_labels = np.concatenate(patch_label_chunks, axis=0)
+        patch_scores = np.concatenate(patch_score_chunks, axis=0)
+        image_labels = np.concatenate(image_label_chunks, axis=0)
+        image_scores = np.concatenate(image_score_chunks, axis=0)
 
         patch_metrics = binary_classification_metrics(
             patch_labels,
             patch_scores,
             threshold,
-        )
-        patch_preds = (patch_scores >= threshold).astype(np.int64)
-        image_labels, image_scores, _, image_rows = self._aggregate_image_level(
-            patch_paths=patch_paths,
-            patch_labels=patch_labels,
-            patch_scores=patch_scores,
-            patch_preds=patch_preds,
         )
         image_metrics = binary_classification_metrics(
             image_labels,
@@ -261,58 +326,71 @@ class InferenceEngine:
             self.cfg.inference.run_acceptance_ratio,
         )
 
-        image_pred_by_path = {
-            str(row["path"]): int(row["image_prediction"])
-            for row in image_rows
-        }
-        anomaly_ratio_by_path = {
-            str(row["path"]): float(row["anomalous_patch_ratio"])
-            for row in image_rows
-        }
-        for row, pred in zip(rows, patch_preds, strict=True):
-            path = str(row["path"])
-            row["patch_prediction"] = int(pred)
-            row["image_prediction"] = image_pred_by_path[path]
-            row["anomalous_patch_ratio"] = anomaly_ratio_by_path[path]
-
         metrics = {
             **self._prefix_metrics(patch_metrics, "patch"),
             **self._prefix_metrics(image_metrics, "image"),
         }
         for reporter in self.reporters:
             reporter.log_evaluation(metrics)
-            reporter.write_predictions(rows)
         return metrics
 
     def infer(
         self,
         loader: DataLoader,
         threshold: float,
-    ) -> list[dict[str, str | float | int]]:
-        patch_labels, patch_scores, patch_paths, rows = self._collect_scores(loader)
+    ) -> int:
+        """Run inference and stream predictions, returning written-row count."""
+        n_patches_per_image: int | None = None
+        prediction_count = 0
 
-        patch_preds = (patch_scores >= threshold).astype(np.int64)
-        _, _, _, image_rows = self._aggregate_image_level(
-            patch_paths=patch_paths,
-            patch_labels=patch_labels,
-            patch_scores=patch_scores,
-            patch_preds=patch_preds,
-        )
-        image_pred_by_path = {
-            str(row["path"]): int(row["image_prediction"])
-            for row in image_rows
-        }
-        anomaly_ratio_by_path = {
-            str(row["path"]): float(row["anomalous_patch_ratio"])
-            for row in image_rows
-        }
+        for batch in loader:
+            output = self.backend.infer_step(batch)
+            patch_scores = output.patch_scores.detach().cpu().numpy().astype(np.float64)
 
-        for row, pred in zip(rows, patch_preds, strict=True):
-            path = str(row["path"])
-            row["patch_prediction"] = int(pred)
-            row["image_prediction"] = image_pred_by_path[path]
-            row["anomalous_patch_ratio"] = anomaly_ratio_by_path[path]
+            images = batch["image"]
+            if not isinstance(images, torch.Tensor):
+                raise TypeError("batch['image'] must be tensor")
+            n_images, n_patches_per_image = self._validate_batch_patch_layout(
+                images=images,
+                patch_scores=patch_scores,
+                expected_patches_per_image=n_patches_per_image,
+            )
 
-        for reporter in self.reporters:
-            reporter.write_predictions(rows)
-        return rows
+            paths_raw = batch["path"]
+            if not isinstance(paths_raw, list):
+                raise TypeError("batch['path'] must be list[str]")
+            if len(paths_raw) != n_images:
+                raise ValueError("batch['path'] length must match batch image count")
+
+            patch_preds = (patch_scores >= threshold).astype(np.int64)
+            patch_pred_matrix = patch_preds.reshape(n_images, n_patches_per_image)
+            patch_score_matrix = patch_scores.reshape(n_images, n_patches_per_image)
+            image_scores = patch_pred_matrix.mean(axis=1, dtype=np.float64)
+            image_preds = (
+                image_scores >= self.cfg.inference.run_acceptance_ratio
+            ).astype(np.int64)
+
+            chunk_rows: list[dict[str, str | float | int]] = []
+            for image_idx, image_path in enumerate(paths_raw):
+                anomaly_ratio = float(image_scores[image_idx])
+                image_pred = int(image_preds[image_idx])
+                for patch_idx in range(n_patches_per_image):
+                    chunk_rows.append(
+                        {
+                            "path": image_path,
+                            "patch_index": int(patch_idx),
+                            "score": float(patch_score_matrix[image_idx, patch_idx]),
+                            "patch_prediction": int(
+                                patch_pred_matrix[image_idx, patch_idx]
+                            ),
+                            "image_prediction": image_pred,
+                            "anomalous_patch_ratio": anomaly_ratio,
+                        }
+                    )
+
+            prediction_count += len(chunk_rows)
+            self._emit_prediction_rows(chunk_rows)
+
+        if n_patches_per_image is None:
+            raise ValueError("Inference loader produced no batches")
+        return prediction_count

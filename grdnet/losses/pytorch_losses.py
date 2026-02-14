@@ -17,6 +17,7 @@ class SsimLoss(nn.Module):
         self.window_size = window_size
 
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Compute SSIM distance `1 - mean(SSIM)`."""
         c1 = 0.01**2
         c2 = 0.03**2
 
@@ -67,6 +68,7 @@ class FocalBinaryLoss(nn.Module):
         self.gamma = gamma
 
     def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        """Compute mean focal loss for binary probabilities."""
         y_pred = y_pred.clamp(min=1e-6, max=1.0 - 1e-6)
         bce = -(y_true * torch.log(y_pred) + (1.0 - y_true) * torch.log(1.0 - y_pred))
         p_t = y_true * y_pred + (1.0 - y_true) * (1.0 - y_pred)

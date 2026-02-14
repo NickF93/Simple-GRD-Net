@@ -72,6 +72,7 @@ def _maybe_load_checkpoint(
 
 
 def run_validate_config(config_path: str) -> int:
+    """Validate one YAML configuration file."""
     LOGGER.info("command=validate-config start path=%s", config_path)
     _ = load_experiment_config(config_path)
     LOGGER.info("command=validate-config success path=%s", config_path)
@@ -79,6 +80,7 @@ def run_validate_config(config_path: str) -> int:
 
 
 def run_train(config_path: str) -> int:
+    """Run end-to-end training using one profile configuration."""
     LOGGER.info("command=train start path=%s", config_path)
     cfg, backend, datamodule, reporters = _setup(config_path)
 
@@ -95,6 +97,7 @@ def run_train(config_path: str) -> int:
 
 
 def run_calibrate(config_path: str, checkpoint: str | None) -> int:
+    """Calibrate anomaly threshold from the configured calibration split."""
     LOGGER.info(
         "command=calibrate start path=%s checkpoint=%s",
         config_path,
@@ -117,6 +120,7 @@ def run_calibrate(config_path: str, checkpoint: str | None) -> int:
 
 
 def run_evaluate(config_path: str, checkpoint: str | None) -> int:
+    """Evaluate the model and threshold on the configured test split."""
     LOGGER.info(
         "command=eval start path=%s checkpoint=%s",
         config_path,
@@ -151,6 +155,7 @@ def run_evaluate(config_path: str, checkpoint: str | None) -> int:
 
 
 def run_infer(config_path: str, checkpoint: str | None) -> int:
+    """Run inference and export prediction CSV rows."""
     LOGGER.info(
         "command=infer start path=%s checkpoint=%s",
         config_path,
@@ -178,7 +183,7 @@ def run_infer(config_path: str, checkpoint: str | None) -> int:
         threshold = inference_engine.calibrate(calibration_loader)
 
     LOGGER.info("running_inference threshold=%s", threshold)
-    rows = inference_engine.infer(test_loader, threshold=threshold)
-    LOGGER.info("predictions=%d", len(rows))
+    prediction_count = inference_engine.infer(test_loader, threshold=threshold)
+    LOGGER.info("predictions=%d", prediction_count)
     LOGGER.info("command=infer completed")
     return 0

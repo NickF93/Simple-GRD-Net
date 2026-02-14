@@ -52,6 +52,7 @@ class ResidualBlock(nn.Module):
             self.proj = nn.Identity()
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Run one residual block."""
         residual = self.proj(inputs)
         x = self.act(self.bn1(self.conv1(inputs)))
         x = self.bn2(self.conv2(x))
@@ -94,6 +95,7 @@ class ResidualEncoder(nn.Module):
         self.out_channels = channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode an input tensor into stage-wise residual features."""
         x = self.stem(x)
         x = self.blocks(x)
         return x
@@ -146,6 +148,7 @@ class ResidualDecoder(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Decode residual features into a reconstructed image patch."""
         x = self.blocks(x)
         x = self.out(x)
         return x

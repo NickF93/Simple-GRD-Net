@@ -98,6 +98,7 @@ class GeneratorEDE(nn.Module):
         self,
         x_noisy: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Generate reconstruction and latent consistency pair from noisy input."""
         encoded = self.encoder(x_noisy)
         z, decoder_input = self._latent_projection(encoded)
         x_rebuilt = self.decoder(decoder_input)

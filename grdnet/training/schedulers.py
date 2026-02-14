@@ -45,6 +45,7 @@ class GammaCosineAnnealingWarmRestarts(LRScheduler):
         return cycle, t_cur, t_i
 
     def get_lr(self) -> list[float]:
+        """Return current learning rates for each optimizer param-group."""
         step = max(self.last_epoch, 0)
         cycle, t_cur, t_i = self._cycle_state(step)
         amplitude = self.restart_gamma**cycle

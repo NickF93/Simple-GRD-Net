@@ -22,6 +22,10 @@ class CsvReporter(Reporter):
         )
 
         self._metrics_header_written = self._metrics_path.exists()
+        # Prediction output is command-scoped: truncate once at startup, append later.
+        if self._predictions_path.exists():
+            self._predictions_path.unlink()
+        self._predictions_header_written = False
 
     @staticmethod
     def _write_rows(
@@ -43,6 +47,7 @@ class CsvReporter(Reporter):
         return True
 
     def log_epoch(self, *, epoch: int, split: str, metrics: dict[str, float]) -> None:
+        """Append one epoch metric row."""
         row = {"kind": "epoch", "epoch": epoch, "split": split, **metrics}
         self._metrics_header_written = self._write_rows(
             self._metrics_path,
@@ -51,6 +56,7 @@ class CsvReporter(Reporter):
         )
 
     def log_evaluation(self, metrics: dict[str, float]) -> None:
+        """Append one evaluation metric row."""
         row = {"kind": "evaluation", "epoch": -1, "split": "test", **metrics}
         self._metrics_header_written = self._write_rows(
             self._metrics_path,
@@ -59,4 +65,9 @@ class CsvReporter(Reporter):
         )
 
     def write_predictions(self, rows: list[dict[str, str | float | int]]) -> None:
-        _ = self._write_rows(self._predictions_path, rows, header_written=False)
+        """Append one chunk of prediction rows."""
+        self._predictions_header_written = self._write_rows(
+            self._predictions_path,
+            rows,
+            header_written=self._predictions_header_written,
+        )

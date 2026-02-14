@@ -119,6 +119,7 @@ class PyTorchBackend(BackendStrategy):
 
     @property
     def device(self) -> torch.device:
+        """Return backend runtime device."""
         return self._device
 
     def _autocast(self):
@@ -155,6 +156,7 @@ class PyTorchBackend(BackendStrategy):
         optimizer.step()
 
     def build_models(self) -> ModelBundle:
+        """Instantiate model modules for the selected profile."""
         patch_shape = self.cfg.data.patch_size
         generator = GeneratorEDE(
             in_channels=self.cfg.data.channels,
@@ -186,6 +188,7 @@ class PyTorchBackend(BackendStrategy):
         )
 
     def build_optimizers(self, models: ModelBundle) -> OptimizerBundle:
+        """Instantiate optimizers for all active model branches."""
         betas = self.cfg.optimizer.adam_betas
         generator = AdamW(
             models.generator.parameters(),
@@ -215,6 +218,7 @@ class PyTorchBackend(BackendStrategy):
         )
 
     def build_schedulers(self, optimizers: OptimizerBundle) -> SchedulerBundle:
+        """Instantiate learning-rate schedulers for all active optimizers."""
         generator = GammaCosineAnnealingWarmRestarts(
             optimizers.generator,
             first_restart_steps=self.cfg.scheduler.first_restart_steps,
@@ -325,6 +329,7 @@ class PyTorchBackend(BackendStrategy):
         return x, roi_mask, noise_mask, z, x_rebuilt, z_rebuilt, noise_loss, x_noisy
 
     def train_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
+        """Execute one training step over GAN and optional segmentator branches."""
         self.models.generator.train()
         self.models.discriminator.train()
         if self.models.segmentator is not None:
@@ -418,6 +423,7 @@ class PyTorchBackend(BackendStrategy):
         )
 
     def eval_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
+        """Execute one validation step without gradient updates."""
         self.models.generator.eval()
         self.models.discriminator.eval()
         if self.models.segmentator is not None:
@@ -485,6 +491,7 @@ class PyTorchBackend(BackendStrategy):
             )
 
     def infer_step(self, batch: dict[str, torch.Tensor | int | str]) -> StepOutput:
+        """Execute one inference step and return per-patch scores."""
         self.models.generator.eval()
         if self.models.segmentator is not None:
             self.models.segmentator.eval()

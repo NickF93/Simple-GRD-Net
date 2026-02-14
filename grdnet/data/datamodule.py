@@ -129,6 +129,7 @@ class DataModule:
         )
 
     def train_loader(self) -> DataLoader:
+        """Build the training dataloader."""
         dataset = self._build_dataset(
             root=self._cfg.train_dir,
             nominal_only=self._cfg.nominal_train_only,
@@ -139,6 +140,7 @@ class DataModule:
         return self._loader(dataset, shuffle=True)
 
     def val_loader(self) -> DataLoader | None:
+        """Build validation loader or derive a split from training data."""
         if self._cfg.val_dir is not None:
             dataset = self._build_dataset(
                 root=self._cfg.val_dir,
@@ -162,6 +164,7 @@ class DataModule:
         return self._loader(val_subset, shuffle=False)
 
     def test_loader(self) -> DataLoader | None:
+        """Build test/evaluation dataloader when configured."""
         if self._cfg.test_dir is None:
             return None
         dataset = self._build_dataset(
@@ -174,6 +177,7 @@ class DataModule:
         return self._loader(dataset, shuffle=False)
 
     def calibration_loader(self) -> DataLoader | None:
+        """Build calibration dataloader when configured."""
         if self._cfg.calibration_dir is None:
             return None
         dataset = self._build_dataset(

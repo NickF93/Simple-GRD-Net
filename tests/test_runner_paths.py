@@ -211,7 +211,7 @@ def test_run_infer_uses_calibration_when_threshold_missing(monkeypatch) -> None:
         def infer(self, loader, threshold):
             _ = loader, threshold
             calls["infer"] += 1
-            return [{"path": "a.png"}]
+            return 1
 
     monkeypatch.setattr(
         "grdnet.pipeline.runner._setup",

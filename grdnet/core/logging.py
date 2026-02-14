@@ -13,6 +13,7 @@ class ColorLogFormatter(logging.Formatter):
     """Terminal-friendly formatter with level-based coloring."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Render one log record with timestamp, context, and ANSI colors."""
         timestamp = datetime.now(UTC).isoformat()
         message = (
             f"{timestamp} | {record.levelname:<8} | {record.name} | "

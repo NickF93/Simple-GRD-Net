@@ -205,6 +205,7 @@ class MvtecLikeAdapter:
         roi_root: Path | None,
         mask_root: Path | None,
     ) -> Dataset:
+        """Index one split root and build a dataset instance."""
         samples = self._index(root=root, nominal_only=nominal_only)
         return MvtecLikeDataset(
             samples,

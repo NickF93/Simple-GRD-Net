@@ -42,10 +42,12 @@ def _perlin_2d(
     d_w = max(1, width // res_w)
 
     def tile(y0: int, y1: int, x0: int, x1: int) -> torch.Tensor:
+        """Tile one gradient corner grid to full image resolution."""
         patch = gradients[y0:y1, x0:x1]
         return patch.repeat_interleave(d_h, dim=0).repeat_interleave(d_w, dim=1)
 
     def dot(grad: torch.Tensor, shift_y: float, shift_x: float) -> torch.Tensor:
+        """Compute gradient dot product for one corner shift."""
         shifted = torch.stack((grid[..., 0] + shift_y, grid[..., 1] + shift_x), dim=-1)
         return (shifted * grad[:height, :width]).sum(dim=-1)
 
@@ -55,6 +57,7 @@ def _perlin_2d(
     n11 = dot(tile(1, None, 1, None), -1.0, -1.0)
 
     def fade_curve(values: torch.Tensor) -> torch.Tensor:
+        """Apply quintic Perlin interpolation curve."""
         return 6 * values**5 - 15 * values**4 + 10 * values**3
 
     t = fade_curve(grid[:height, :width])
