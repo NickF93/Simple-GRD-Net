@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import logging
 from typing import Iterable
 
 import torch
 from torch import nn
-from torch.cuda.amp import GradScaler
 from torch.optim import AdamW, Optimizer
 
 from grdnet.backends.base import (
@@ -48,7 +48,13 @@ class PyTorchBackend(BackendStrategy):
                 "Set backend.device='auto' with CUDA available, "
                 "or disable mixed precision."
             )
-        self._grad_scaler = GradScaler(enabled=self._amp_enabled)
+        if self._amp_enabled:
+            self._grad_scaler: torch.amp.GradScaler | None = torch.amp.GradScaler(
+                "cuda",
+                enabled=True,
+            )
+        else:
+            self._grad_scaler = None
         self.losses = GrdNetLossComputer(cfg)
 
         self.models = self.build_models()
@@ -66,10 +72,12 @@ class PyTorchBackend(BackendStrategy):
         return self._device
 
     def _autocast(self):
+        if not self._amp_enabled:
+            return nullcontext()
         return torch.autocast(
             device_type="cuda",
             dtype=torch.float16,
-            enabled=self._amp_enabled,
+            enabled=True,
         )
 
     def _backward_step(
@@ -81,6 +89,8 @@ class PyTorchBackend(BackendStrategy):
         max_grad_norm: float | None = None,
     ) -> None:
         if self._amp_enabled:
+            if self._grad_scaler is None:
+                raise RuntimeError("GradScaler must be initialized when AMP is enabled")
             self._grad_scaler.scale(loss).backward()
             if max_grad_norm is not None and parameters is not None:
                 self._grad_scaler.unscale_(optimizer)

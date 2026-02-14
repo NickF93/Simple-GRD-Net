@@ -123,7 +123,8 @@ class DataModule:
             batch_size=self._cfg.batch_size,
             shuffle=shuffle,
             num_workers=self._cfg.num_workers,
-            pin_memory=True,
+            # Default to warning-free behavior across CPU/GPU CI and local runs.
+            pin_memory=False,
             drop_last=False,
         )
 
