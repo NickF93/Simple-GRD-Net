@@ -14,7 +14,14 @@ from torch.utils.data import Dataset
 from grdnet.config.schema import DataConfig
 from grdnet.core.exceptions import DatasetContractError
 
-_ALLOWED_EXTENSIONS: tuple[str, ...] = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+_ALLOWED_EXTENSIONS: tuple[str, ...] = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".bmp",
+    ".tif",
+    ".tiff",
+)
 LOGGER = logging.getLogger(__name__)
 
 
@@ -22,6 +29,7 @@ LOGGER = logging.getLogger(__name__)
 class _IndexedSample:
     image_path: Path
     class_name: str
+    class_relative_path: Path
 
 
 class MvtecLikeDataset(Dataset):
@@ -49,7 +57,10 @@ class MvtecLikeDataset(Dataset):
         mode = "L" if self._cfg.channels == 1 else "RGB"
         with Image.open(path) as image:
             image = image.convert(mode)
-            image = image.resize((self._cfg.image_size, self._cfg.image_size), Image.Resampling.BILINEAR)
+            image = image.resize(
+                (self._cfg.image_size, self._cfg.image_size),
+                Image.Resampling.BILINEAR,
+            )
             array = np.asarray(image, dtype=np.float32) / 255.0
 
         if self._cfg.channels == 1:
@@ -58,34 +69,90 @@ class MvtecLikeDataset(Dataset):
         tensor = torch.from_numpy(array).permute(2, 0, 1).contiguous()
         return tensor
 
-    def _load_mask(self, base_path: Path, root: Path | None, default_fill: float) -> torch.Tensor:
-        if root is None:
-            return torch.full((1, self._cfg.image_size, self._cfg.image_size), default_fill, dtype=torch.float32)
-
-        rel = base_path.parent.name + "/" + base_path.name
-        mask_path = root / rel
-        if not mask_path.exists():
-            LOGGER.debug("Mask missing at %s; using default_fill=%s", mask_path, default_fill)
-            return torch.full(
-                (1, self._cfg.image_size, self._cfg.image_size),
-                default_fill,
-                dtype=torch.float32,
-            )
-
+    def _load_binary_mask(self, mask_path: Path) -> torch.Tensor:
         with Image.open(mask_path) as image:
             image = image.convert("L")
-            image = image.resize((self._cfg.image_size, self._cfg.image_size), Image.Resampling.NEAREST)
+            image = image.resize(
+                (self._cfg.image_size, self._cfg.image_size),
+                Image.Resampling.NEAREST,
+            )
             array = np.asarray(image, dtype=np.float32) / 255.0
 
-        mask = torch.from_numpy((array > 0.5).astype(np.float32)).unsqueeze(0)
-        return mask
+        return torch.from_numpy((array > 0.5).astype(np.float32)).unsqueeze(0)
+
+    def _resolve_roi_mask_path(self, sample: _IndexedSample) -> Path | None:
+        if self._roi_root is None:
+            return None
+
+        base = self._roi_root / sample.class_name / sample.class_relative_path
+        candidates = (
+            base,
+            base.with_suffix(".png"),
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _resolve_gt_mask_path(self, sample: _IndexedSample) -> Path | None:
+        if self._mask_root is None:
+            return None
+
+        base = self._mask_root / sample.class_name / sample.class_relative_path
+        candidates = (
+            base,
+            base.with_name(f"{base.stem}_mask{base.suffix}"),
+            base.with_suffix(".png"),
+            base.with_name(f"{base.stem}_mask.png"),
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _load_roi_mask(self, sample: _IndexedSample) -> torch.Tensor:
+        roi_path = self._resolve_roi_mask_path(sample)
+        if roi_path is None:
+            return torch.ones(
+                (1, self._cfg.image_size, self._cfg.image_size),
+                dtype=torch.float32,
+            )
+        return self._load_binary_mask(roi_path)
+
+    def _load_gt_mask(self, sample: _IndexedSample) -> torch.Tensor:
+        is_good = sample.class_name == self._cfg.class_good_name
+        if self._mask_root is None:
+            if is_good:
+                return torch.zeros(
+                    (1, self._cfg.image_size, self._cfg.image_size),
+                    dtype=torch.float32,
+                )
+            raise DatasetContractError(
+                "mask_root is required for anomalous samples during "
+                "calibration/evaluation. "
+                f"Missing for sample={sample.image_path}"
+            )
+
+        gt_mask_path = self._resolve_gt_mask_path(sample)
+        if gt_mask_path is None:
+            if is_good:
+                return torch.zeros(
+                    (1, self._cfg.image_size, self._cfg.image_size),
+                    dtype=torch.float32,
+                )
+            raise DatasetContractError(
+                "Ground-truth mask missing for anomalous sample. "
+                f"class={sample.class_name} image={sample.image_path}"
+            )
+
+        return self._load_binary_mask(gt_mask_path)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor | int | str]:
         sample = self._samples[index]
         image = self._load_image(sample.image_path)
         label = 0 if sample.class_name == self._cfg.class_good_name else 1
-        roi_mask = self._load_mask(sample.image_path, self._roi_root, default_fill=1.0)
-        gt_mask = self._load_mask(sample.image_path, self._mask_root, default_fill=0.0)
+        roi_mask = self._load_roi_mask(sample)
+        gt_mask = self._load_gt_mask(sample)
 
         return {
             "image": image,
@@ -114,11 +181,19 @@ class MvtecLikeAdapter:
 
             for path in sorted(class_dir.rglob("*")):
                 if path.is_file() and path.suffix.lower() in _ALLOWED_EXTENSIONS:
-                    samples.append(_IndexedSample(image_path=path, class_name=class_name))
+                    relative = path.relative_to(class_dir)
+                    samples.append(
+                        _IndexedSample(
+                            image_path=path,
+                            class_name=class_name,
+                            class_relative_path=relative,
+                        )
+                    )
 
         if not samples:
             raise DatasetContractError(
-                f"No images found in {root}. Expected class subfolders with image files."
+                "No images found in "
+                f"{root}. Expected class subfolders with image files."
             )
         return samples
 

@@ -38,9 +38,13 @@ augmentation:
   gaussian_noise_std_max: 0.03
 
 model:
-  base_features: 64
+  # Paper-aligned default: 4 stages, 3 residual blocks per stage, final 16x16x1024.
+  # Ablation alternative (previous lightweight setting):
+  # base_features: 64
+  # stages: [2, 2, 2, 2]
+  base_features: 128
   latent_dim: 64
-  stages: [2, 2, 2, 2]
+  stages: [3, 3, 3, 3]
   dense_bottleneck: true
   segmentator_base_features: 64
 

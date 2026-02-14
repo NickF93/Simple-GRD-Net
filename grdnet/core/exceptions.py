@@ -15,3 +15,7 @@ class BackendNotAvailableError(GrdNetError):
 
 class DatasetContractError(GrdNetError):
     """Raised when a dataset does not satisfy the expected contract."""
+
+
+class CheckpointError(GrdNetError):
+    """Raised when checkpoint save/load contract validation fails."""

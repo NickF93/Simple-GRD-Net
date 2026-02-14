@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from typing import Iterable
 
 import torch
 from torch import nn
-from torch.optim import AdamW
+from torch.cuda.amp import GradScaler
+from torch.optim import AdamW, Optimizer
 
 from grdnet.backends.base import (
     BackendStrategy,
@@ -16,6 +18,7 @@ from grdnet.backends.base import (
     StepOutput,
 )
 from grdnet.config.schema import ExperimentConfig
+from grdnet.core.exceptions import ConfigurationError
 from grdnet.data.patches import extract_patches
 from grdnet.losses.pytorch_losses import GrdNetLossComputer
 from grdnet.metrics.anomaly import anomaly_heatmap, anomaly_score_ssim_per_sample
@@ -38,6 +41,14 @@ class PyTorchBackend(BackendStrategy):
     def __init__(self, cfg: ExperimentConfig) -> None:
         super().__init__(cfg)
         self._device = self._resolve_device(cfg.backend.device)
+        self._amp_enabled = cfg.backend.mixed_precision
+        if self._amp_enabled and self._device.type != "cuda":
+            raise ConfigurationError(
+                "backend.mixed_precision=true requires CUDA device. "
+                "Set backend.device='auto' with CUDA available, "
+                "or disable mixed precision."
+            )
+        self._grad_scaler = GradScaler(enabled=self._amp_enabled)
         self.losses = GrdNetLossComputer(cfg)
 
         self.models = self.build_models()
@@ -53,6 +64,35 @@ class PyTorchBackend(BackendStrategy):
     @property
     def device(self) -> torch.device:
         return self._device
+
+    def _autocast(self):
+        return torch.autocast(
+            device_type="cuda",
+            dtype=torch.float16,
+            enabled=self._amp_enabled,
+        )
+
+    def _backward_step(
+        self,
+        *,
+        loss: torch.Tensor,
+        optimizer: Optimizer,
+        parameters: Iterable[torch.nn.Parameter] | None = None,
+        max_grad_norm: float | None = None,
+    ) -> None:
+        if self._amp_enabled:
+            self._grad_scaler.scale(loss).backward()
+            if max_grad_norm is not None and parameters is not None:
+                self._grad_scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(list(parameters), max_grad_norm)
+            self._grad_scaler.step(optimizer)
+            self._grad_scaler.update()
+            return
+
+        loss.backward()
+        if max_grad_norm is not None and parameters is not None:
+            torch.nn.utils.clip_grad_norm_(list(parameters), max_grad_norm)
+        optimizer.step()
 
     def build_models(self) -> ModelBundle:
         patch_shape = self.cfg.data.patch_size
@@ -231,48 +271,49 @@ class PyTorchBackend(BackendStrategy):
             self.models.segmentator.train()
 
         x, roi_mask, _ = self._prepare(batch)
-        (
-            x,
-            roi_mask,
-            noise_mask,
-            z,
-            x_rebuilt,
-            z_rebuilt,
-            noise_loss,
-            x_noisy,
-        ) = self._common_forward(x, roi_mask, with_augmentation=True)
+        with self._autocast():
+            (
+                x,
+                roi_mask,
+                noise_mask,
+                z,
+                x_rebuilt,
+                z_rebuilt,
+                noise_loss,
+                x_noisy,
+            ) = self._common_forward(x, roi_mask, with_augmentation=True)
 
         # Discriminator step.
         self.optimizers.discriminator.zero_grad(set_to_none=True)
-        _, pred_real = self.models.discriminator(x)
-        _, pred_fake = self.models.discriminator(x_rebuilt.detach())
-        loss_disc, loss_disc_scalar = self.losses.discriminator_total(
-            pred_real,
-            pred_fake,
-        )
-        loss_disc.backward()
-        self.optimizers.discriminator.step()
+        with self._autocast():
+            _, pred_real = self.models.discriminator(x)
+            _, pred_fake = self.models.discriminator(x_rebuilt.detach())
+            loss_disc, loss_disc_scalar = self.losses.discriminator_total(
+                pred_real,
+                pred_fake,
+            )
+        self._backward_step(loss=loss_disc, optimizer=self.optimizers.discriminator)
 
         # Generator step.
         self.optimizers.generator.zero_grad(set_to_none=True)
-        feat_real_gen, _ = self.models.discriminator(x)
-        feat_fake_gen, _ = self.models.discriminator(x_rebuilt)
-        loss_gen, stats_gen = self.losses.generator_total(
-            x=x,
-            x_rebuilt=x_rebuilt,
-            z=z,
-            z_rebuilt=z_rebuilt,
-            feat_real=feat_real_gen,
-            feat_fake=feat_fake_gen,
-            noise_loss=noise_loss,
-        )
-        loss_gen.backward()
-        if self.cfg.training.max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(
-                self.models.generator.parameters(),
-                self.cfg.training.max_grad_norm,
+        with self._autocast():
+            feat_real_gen, _ = self.models.discriminator(x)
+            feat_fake_gen, _ = self.models.discriminator(x_rebuilt)
+            loss_gen, stats_gen = self.losses.generator_total(
+                x=x,
+                x_rebuilt=x_rebuilt,
+                z=z,
+                z_rebuilt=z_rebuilt,
+                feat_real=feat_real_gen,
+                feat_fake=feat_fake_gen,
+                noise_loss=noise_loss,
             )
-        self.optimizers.generator.step()
+        self._backward_step(
+            loss=loss_gen,
+            optimizer=self.optimizers.generator,
+            parameters=self.models.generator.parameters(),
+            max_grad_norm=self.cfg.training.max_grad_norm,
+        )
 
         seg_map: torch.Tensor | None = None
         seg_loss_scalar = 0.0
@@ -281,16 +322,19 @@ class PyTorchBackend(BackendStrategy):
             and self.optimizers.segmentator is not None
         ):
             self.optimizers.segmentator.zero_grad(set_to_none=True)
-            seg_map = self.models.segmentator(
-                torch.cat([x_noisy, x_rebuilt.detach()], dim=1)
+            with self._autocast():
+                seg_map = self.models.segmentator(
+                    torch.cat([x_noisy, x_rebuilt.detach()], dim=1)
+                )
+                loss_seg, seg_loss_scalar = self.losses.segmentator_total(
+                    pred_mask=seg_map,
+                    gt_mask=noise_mask,
+                    roi_mask=roi_mask,
+                )
+            self._backward_step(
+                loss=loss_seg,
+                optimizer=self.optimizers.segmentator,
             )
-            loss_seg, seg_loss_scalar = self.losses.segmentator_total(
-                pred_mask=seg_map,
-                gt_mask=noise_mask,
-                roi_mask=roi_mask,
-            )
-            loss_seg.backward()
-            self.optimizers.segmentator.step()
 
         patch_scores = anomaly_score_ssim_per_sample(x, x_rebuilt)
         heatmap = anomaly_heatmap(x, x_rebuilt)
@@ -316,44 +360,45 @@ class PyTorchBackend(BackendStrategy):
 
         with torch.no_grad():
             x, roi_mask, _ = self._prepare(batch)
-            (
-                x,
-                roi_mask,
-                noise_mask,
-                z,
-                x_rebuilt,
-                z_rebuilt,
-                noise_loss,
-                x_noisy,
-            ) = self._common_forward(x, roi_mask, with_augmentation=False)
+            with self._autocast():
+                (
+                    x,
+                    roi_mask,
+                    noise_mask,
+                    z,
+                    x_rebuilt,
+                    z_rebuilt,
+                    noise_loss,
+                    x_noisy,
+                ) = self._common_forward(x, roi_mask, with_augmentation=False)
 
-            feat_real, pred_real = self.models.discriminator(x)
-            feat_fake, pred_fake = self.models.discriminator(x_rebuilt)
-            loss_gen, stats_gen = self.losses.generator_total(
-                x=x,
-                x_rebuilt=x_rebuilt,
-                z=z,
-                z_rebuilt=z_rebuilt,
-                feat_real=feat_real,
-                feat_fake=feat_fake,
-                noise_loss=noise_loss,
-            )
-            loss_disc, loss_disc_scalar = self.losses.discriminator_total(
-                pred_real,
-                pred_fake,
-            )
+                feat_real, pred_real = self.models.discriminator(x)
+                feat_fake, pred_fake = self.models.discriminator(x_rebuilt)
+                loss_gen, stats_gen = self.losses.generator_total(
+                    x=x,
+                    x_rebuilt=x_rebuilt,
+                    z=z,
+                    z_rebuilt=z_rebuilt,
+                    feat_real=feat_real,
+                    feat_fake=feat_fake,
+                    noise_loss=noise_loss,
+                )
+                loss_disc, loss_disc_scalar = self.losses.discriminator_total(
+                    pred_real,
+                    pred_fake,
+                )
 
-            seg_map: torch.Tensor | None = None
-            seg_loss_scalar = 0.0
-            if self.models.segmentator is not None:
-                seg_map = self.models.segmentator(
-                    torch.cat([x_noisy, x_rebuilt], dim=1)
-                )
-                _, seg_loss_scalar = self.losses.segmentator_total(
-                    pred_mask=seg_map,
-                    gt_mask=noise_mask,
-                    roi_mask=roi_mask,
-                )
+                seg_map: torch.Tensor | None = None
+                seg_loss_scalar = 0.0
+                if self.models.segmentator is not None:
+                    seg_map = self.models.segmentator(
+                        torch.cat([x_noisy, x_rebuilt], dim=1)
+                    )
+                    _, seg_loss_scalar = self.losses.segmentator_total(
+                        pred_mask=seg_map,
+                        gt_mask=noise_mask,
+                        roi_mask=roi_mask,
+                    )
 
             patch_scores = anomaly_score_ssim_per_sample(x, x_rebuilt)
             heatmap = anomaly_heatmap(x, x_rebuilt)
@@ -381,7 +426,8 @@ class PyTorchBackend(BackendStrategy):
 
         with torch.no_grad():
             x, roi_mask, _ = self._prepare(batch)
-            z, x_rebuilt, _ = self.models.generator(x)
+            with self._autocast():
+                z, x_rebuilt, _ = self.models.generator(x)
             del z
 
             seg_map: torch.Tensor | None = None
@@ -389,7 +435,8 @@ class PyTorchBackend(BackendStrategy):
                 self.models.segmentator is not None
                 and self.cfg.profile.mode == "grdnet_2023_full"
             ):
-                seg_map = self.models.segmentator(torch.cat([x, x_rebuilt], dim=1))
+                with self._autocast():
+                    seg_map = self.models.segmentator(torch.cat([x, x_rebuilt], dim=1))
 
             scoring_strategy = self.cfg.inference.scoring_strategy
             if scoring_strategy == "profile_default":

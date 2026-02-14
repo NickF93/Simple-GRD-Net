@@ -167,7 +167,7 @@ class InferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     anomaly_threshold: float | None = Field(default=None, ge=0.0)
-    run_acceptance_ratio: float = Field(default=0.7, gt=0.0, le=1.0)
+    run_acceptance_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
     scoring_strategy: Literal[
         "profile_default",
         "ssim",

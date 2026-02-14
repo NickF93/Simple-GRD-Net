@@ -19,16 +19,21 @@ def test_gamma_scheduler_applies_decay_at_restart() -> None:
         restart_gamma=0.5,
     )
 
+    initial = scheduler.get_last_lr()[0]
+    optimizer.step()
     scheduler.step()  # step 0
     first = scheduler.get_last_lr()[0]
+    optimizer.step()
     scheduler.step()  # step 1
     second = scheduler.get_last_lr()[0]
+    optimizer.step()
     scheduler.step()  # step 2: restart with gamma
     restart = scheduler.get_last_lr()[0]
 
-    assert first == pytest.approx(1.0)
+    assert initial == pytest.approx(1.0)
+    assert first == pytest.approx(0.5)
     assert second == pytest.approx(0.5)
-    assert restart == pytest.approx(0.5)
+    assert restart == pytest.approx(0.25)
 
 
 class _CountingScheduler:

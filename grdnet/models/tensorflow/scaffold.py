@@ -14,7 +14,7 @@ class _TensorFlowScaffold:
             "Use backend.name='pytorch' for full implementation."
         )
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object) -> None:
         raise NotImplementedError(self._message)
 
 

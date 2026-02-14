@@ -11,12 +11,13 @@ from grdnet.backends.base import (
     SchedulerBundle,
     StepOutput,
 )
+from grdnet.config.schema import ExperimentConfig
 
 
 class TensorFlowScaffoldBackend(BackendStrategy):
     """Scaffold backend exposing future-compatible API contracts."""
 
-    def __init__(self, cfg):
+    def __init__(self, cfg: ExperimentConfig) -> None:
         super().__init__(cfg)
         self._device = torch.device("cpu")
 

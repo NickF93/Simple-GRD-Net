@@ -3,10 +3,46 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import torch
 
 from grdnet.backends.base import BackendStrategy
+from grdnet.core.exceptions import CheckpointError
+
+_BUNDLE_KEYS = ("generator", "discriminator", "segmentator")
+
+
+def _validate_checkpoint_payload(payload: Any, path: Path) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise CheckpointError(f"Invalid checkpoint at {path}: payload must be a dict")
+
+    required_top_level = ("epoch", "models", "optimizers", "schedulers")
+    for key in required_top_level:
+        if key not in payload:
+            raise CheckpointError(
+                f"Invalid checkpoint at {path}: missing top-level key '{key}'"
+            )
+
+    epoch = payload["epoch"]
+    if not isinstance(epoch, int):
+        raise CheckpointError(f"Invalid checkpoint at {path}: 'epoch' must be int")
+    if epoch < 0:
+        raise CheckpointError(f"Invalid checkpoint at {path}: 'epoch' must be >= 0")
+
+    for section in ("models", "optimizers", "schedulers"):
+        section_payload = payload[section]
+        if not isinstance(section_payload, dict):
+            raise CheckpointError(
+                f"Invalid checkpoint at {path}: section '{section}' must be dict"
+            )
+        for key in _BUNDLE_KEYS:
+            if key not in section_payload:
+                raise CheckpointError(
+                    f"Invalid checkpoint at {path}: missing '{section}.{key}'"
+                )
+
+    return payload
 
 
 def save_checkpoint(backend: BackendStrategy, path: Path, *, epoch: int) -> None:
@@ -42,21 +78,67 @@ def save_checkpoint(backend: BackendStrategy, path: Path, *, epoch: int) -> None
 
 def load_checkpoint(backend: BackendStrategy, path: Path) -> int:
     """Load checkpoint and return last completed epoch."""
-    payload = torch.load(path, map_location=backend.device)
+    if not path.exists():
+        raise CheckpointError(f"Checkpoint not found: {path}")
+    if not path.is_file():
+        raise CheckpointError(f"Checkpoint path is not a file: {path}")
 
-    backend.models.generator.load_state_dict(payload["models"]["generator"])
-    backend.models.discriminator.load_state_dict(payload["models"]["discriminator"])
-    if backend.models.segmentator is not None and payload["models"]["segmentator"] is not None:
-        backend.models.segmentator.load_state_dict(payload["models"]["segmentator"])
+    try:
+        try:
+            raw_payload = torch.load(
+                path,
+                map_location=backend.device,
+                weights_only=True,
+            )
+        except TypeError:
+            raw_payload = torch.load(path, map_location=backend.device)
+    except Exception as exc:
+        raise CheckpointError(f"Unable to read checkpoint {path}: {exc}") from exc
 
-    backend.optimizers.generator.load_state_dict(payload["optimizers"]["generator"])
-    backend.optimizers.discriminator.load_state_dict(payload["optimizers"]["discriminator"])
-    if backend.optimizers.segmentator is not None and payload["optimizers"]["segmentator"] is not None:
-        backend.optimizers.segmentator.load_state_dict(payload["optimizers"]["segmentator"])
+    payload = _validate_checkpoint_payload(raw_payload, path)
 
-    backend.schedulers.generator.load_state_dict(payload["schedulers"]["generator"])
-    backend.schedulers.discriminator.load_state_dict(payload["schedulers"]["discriminator"])
-    if backend.schedulers.segmentator is not None and payload["schedulers"]["segmentator"] is not None:
-        backend.schedulers.segmentator.load_state_dict(payload["schedulers"]["segmentator"])
+    try:
+        backend.models.generator.load_state_dict(payload["models"]["generator"])
+        backend.models.discriminator.load_state_dict(payload["models"]["discriminator"])
+
+        segmentator_model_state = payload["models"]["segmentator"]
+        if backend.models.segmentator is not None:
+            if segmentator_model_state is None:
+                raise CheckpointError(
+                    "Checkpoint missing model state for enabled segmentator."
+                )
+            backend.models.segmentator.load_state_dict(segmentator_model_state)
+
+        backend.optimizers.generator.load_state_dict(payload["optimizers"]["generator"])
+        backend.optimizers.discriminator.load_state_dict(
+            payload["optimizers"]["discriminator"]
+        )
+
+        segmentator_opt_state = payload["optimizers"]["segmentator"]
+        if backend.optimizers.segmentator is not None:
+            if segmentator_opt_state is None:
+                raise CheckpointError(
+                    "Checkpoint missing optimizer state for enabled segmentator."
+                )
+            backend.optimizers.segmentator.load_state_dict(segmentator_opt_state)
+
+        backend.schedulers.generator.load_state_dict(payload["schedulers"]["generator"])
+        backend.schedulers.discriminator.load_state_dict(
+            payload["schedulers"]["discriminator"]
+        )
+
+        segmentator_sched_state = payload["schedulers"]["segmentator"]
+        if backend.schedulers.segmentator is not None:
+            if segmentator_sched_state is None:
+                raise CheckpointError(
+                    "Checkpoint missing scheduler state for enabled segmentator."
+                )
+            backend.schedulers.segmentator.load_state_dict(segmentator_sched_state)
+    except CheckpointError:
+        raise
+    except Exception as exc:
+        raise CheckpointError(
+            f"Unable to restore checkpoint state from {path}: {exc}"
+        ) from exc
 
     return int(payload["epoch"])
