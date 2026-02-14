@@ -1,4 +1,4 @@
-# Simple-GRD-Net (Official Rebuild)
+# Simple-GRD-Net
 
 Official configurable implementation of:
 
